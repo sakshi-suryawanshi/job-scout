@@ -1,26 +1,31 @@
-# db.py
+# app/db.py
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from supabase import create_client, Client
 
-load_dotenv()
+# Try loading .env for local dev
+try:
+    load_dotenv()
+except:
+    pass
 
 class Database:
-    def __init__(self):
-        self.url = os.getenv("SUPABASE_URL")
-        self.key = os.getenv("SUPABASE_KEY")
+    def __init__(self, url=None, key=None):
+        self.url = url or os.getenv("SUPABASE_URL")
+        self.key = key or os.getenv("SUPABASE_KEY")
         
         if not self.url or not self.key:
-            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
+            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
         
+        # Lazy import to avoid issues
+        from supabase import create_client, Client
         self.client: Client = create_client(self.url, self.key)
     
     # ========== COMPANIES ==========
     
     def add_company(self, company: Dict[str, Any]) -> Optional[Dict]:
-        """Add single company. Returns created record or None if error."""
+        """Add single company."""
         try:
             result = self.client.table("companies").insert(company).execute()
             return result.data[0] if result.data else None
@@ -29,12 +34,11 @@ class Database:
             return None
     
     def add_companies_bulk(self, companies: List[Dict]) -> int:
-        """Bulk insert companies. Returns count inserted."""
+        """Bulk insert companies."""
         if not companies:
             return 0
         
         try:
-            # Supabase has 1000 row limit per insert
             batch_size = 500
             inserted = 0
             
@@ -49,7 +53,7 @@ class Database:
             return 0
     
     def get_companies(self, active_only: bool = True, limit: int = 1000) -> List[Dict]:
-        """Get companies. Set active_only=False for all."""
+        """Get companies."""
         query = self.client.table("companies").select("*")
         
         if active_only:
@@ -60,8 +64,11 @@ class Database:
     
     def get_company_by_id(self, company_id: str) -> Optional[Dict]:
         """Get single company by UUID."""
-        result = self.client.table("companies").select("*").eq("id", company_id).single().execute()
-        return result.data
+        try:
+            result = self.client.table("companies").select("*").eq("id", company_id).single().execute()
+            return result.data
+        except:
+            return None
     
     def update_company(self, company_id: str, updates: Dict) -> bool:
         """Update company fields."""
@@ -74,7 +81,7 @@ class Database:
             return False
     
     def delete_company(self, company_id: str) -> bool:
-        """Delete company (cascades to jobs)."""
+        """Delete company."""
         try:
             self.client.table("companies").delete().eq("id", company_id).execute()
             return True
@@ -85,13 +92,13 @@ class Database:
     # ========== JOBS ==========
     
     def add_job(self, job: Dict[str, Any]) -> Optional[Dict]:
-        """Add job. Handles duplicate apply_url gracefully."""
+        """Add job."""
         try:
             result = self.client.table("jobs").insert(job).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            if "duplicate key" in str(e).lower():
-                print(f"⚠️ Duplicate job skipped: {job.get('apply_url', 'unknown')[:50]}...")
+            if "duplicate" in str(e).lower():
+                print(f"⚠️ Duplicate job skipped")
             else:
                 print(f"Error adding job: {e}")
             return None
@@ -101,6 +108,7 @@ class Database:
                  is_recommended: Optional[bool] = None,
                  company_id: Optional[str] = None,
                  min_score: Optional[int] = None,
+                 seen_within_days: int = 7,
                  limit: int = 100) -> List[Dict]:
         """Get jobs with filters."""
         query = self.client.table("jobs").select("*, companies(name, website)")
@@ -114,9 +122,9 @@ class Database:
         if min_score:
             query = query.gte("match_score", min_score)
         
-        # Exclude jobs seen in last 7 days by default
-        seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        query = query.gte("discovered_at", seven_days_ago)
+        # Exclude jobs seen in last N days
+        cutoff_date = (datetime.now() - timedelta(days=seen_within_days)).strftime('%Y-%m-%d')
+        query = query.gte("discovered_date", cutoff_date)
         
         result = query.order("discovered_at", desc=True).limit(limit).execute()
         return result.data or []
@@ -140,7 +148,7 @@ class Database:
     # ========== SIGNALS ==========
     
     def add_signal(self, signal: Dict[str, Any]) -> Optional[Dict]:
-        """Add raw signal for processing."""
+        """Add raw signal."""
         try:
             result = self.client.table("signals").insert(signal).execute()
             return result.data[0] if result.data else None
@@ -159,7 +167,7 @@ class Database:
         return result.data or []
     
     def mark_signal_processed(self, signal_id: str, company_id: Optional[str] = None) -> bool:
-        """Mark signal as processed, optionally link to company."""
+        """Mark signal as processed."""
         try:
             updates = {"processed": True}
             if company_id:
@@ -187,7 +195,7 @@ class Database:
             return False
     
     def get_pending_scrapes(self, limit: int = 10) -> List[Dict]:
-        """Get pending scrape jobs, highest priority first."""
+        """Get pending scrape jobs."""
         result = (self.client.table("scrape_queue")
                   .select("*, companies(name, career_url, ats_type)")
                   .eq("status", "pending")
