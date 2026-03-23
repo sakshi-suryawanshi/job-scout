@@ -1,7 +1,8 @@
 streamlit==1.40.0
 supabase==2.3.0
-gotrue==2.4.0
+gotrue==2.4.1
 httpx==0.24.1
+rich==13.9.4
 python-dotenv==1.0.0
 pandas==2.2.3
 pillow==10.4.0
