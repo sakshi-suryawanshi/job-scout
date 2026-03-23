@@ -2,10 +2,10 @@
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
-# Try loading .env for local dev
+# Load env if available
 try:
+    from dotenv import load_dotenv
     load_dotenv()
 except:
     pass
@@ -16,11 +16,11 @@ class Database:
         self.key = key or os.getenv("SUPABASE_KEY")
         
         if not self.url or not self.key:
-            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+            raise ValueError(f"SUPABASE_URL and SUPABASE_KEY must be set. URL: {self.url is not None}, KEY: {self.key is not None}")
         
-        # Lazy import to avoid issues
-        from supabase import create_client, Client
-        self.client: Client = create_client(self.url, self.key)
+        # Import and create client correctly for supabase-py v2.x
+        from supabase import create_client
+        self.client = create_client(self.url, self.key)
     
     # ========== COMPANIES ==========
     
