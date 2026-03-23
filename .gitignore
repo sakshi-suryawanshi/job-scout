@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.env
+.venv
+*.egg-info/
+dist/
+build/
+
+# Supabase / secrets
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Scraping logs / data
+*.log
+data/*.csv
+data/*.json
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Optional: if you store scraped jobs
+jobs_cache/
+
+
+# .gitignore
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+.venv/
+venv/
