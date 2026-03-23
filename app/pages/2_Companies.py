@@ -71,7 +71,7 @@ with tab1:
             display_data.append({
                 "ID": c["id"],
                 "Name": c.get("name", ""),
-                "Career URL": c.get("career_url", "")[:50] + "..." if len(c.get("career_url", "")) > 50 else c.get("career_url", ""),
+                "Career URL": (c.get("career_url", "")[:50] + "...") if c.get("career_url") and len(c.get("career_url", "")) > 50 else c.get("career_url", ""),
                 "ATS": c.get("ats_type", "unknown"),
                 "Source": c.get("source", "manual"),
                 "Active": "✅" if c.get("is_active") else "❌",
