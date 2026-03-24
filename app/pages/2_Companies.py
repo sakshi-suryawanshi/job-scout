@@ -380,34 +380,9 @@ with col2:
     ph_topic = st.selectbox("Topic", ["developer-tools", "saas", "b2b", "Recent"], key="ph_topic")
     ph_pages = st.slider("Pages to scan", 1, 10, 3, key="ph_pages")
     
-    if st.button("🚀 Fetch PH Companies", use_container_width=True):
-        with st.spinner("Scraping Product Hunt..."):
-            try:
-                from worker.discovery.ph_scraper import fetch_ph_companies
-                from db import get_db
-                
-                db = get_db()
-                topic = None if ph_topic == "Recent" else ph_topic
-                
-                companies = fetch_ph_companies(topic=topic, pages=ph_pages, enrich=True)
-                
-                # Check duplicates
-                existing = db.get_companies(active_only=False, limit=10000)
-                existing_names = {c['name'].lower() for c in existing}
-                
-                new = [c for c in companies if c['name'].lower() not in existing_names]
-                
-                if new:
-                    inserted = db.add_companies_bulk(new)
-                    st.success(f"✅ Added {inserted} new PH companies!")
-                    st.balloons()
-                else:
-                    st.info("No new companies found (all may be duplicates)")
-                    
-            except Exception as e:
-                st.error(f"Error: {e}")
-                import traceback
-                st.code(traceback.format_exc())
+    st.info("⚠️ Product Hunt scraping blocked (403 Forbidden). Use **📡 Signals** page → Serper Dorking instead.")
+    if st.button("🚀 Fetch PH Companies", use_container_width=True, disabled=True):
+        pass
 
 try:
     all_companies = db.get_companies(active_only=False, limit=10000)

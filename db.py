@@ -102,17 +102,59 @@ class Database:
             print(f"Error deleting: {e}")
             return False
     
+    def get_company_by_name(self, name: str) -> Optional[Dict]:
+        """Find a company by name (case-insensitive)."""
+        try:
+            result = self._request("GET", "companies", params={
+                "name": f"ilike.{name}",
+                "limit": 1
+            })
+            return result[0] if result else None
+        except:
+            return None
+
+    def find_or_create_company(self, name: str, defaults: Dict = None) -> Optional[str]:
+        """Find company by name or create it. Returns company ID."""
+        existing = self.get_company_by_name(name)
+        if existing:
+            return existing["id"]
+
+        company = {
+            "name": name,
+            "source": "job_scraper",
+            "is_active": True,
+            "priority_score": 7,
+            **(defaults or {}),
+        }
+        result = self.add_company(company)
+        if result:
+            return result["id"]
+        # Might have been created by another request
+        existing = self.get_company_by_name(name)
+        return existing["id"] if existing else None
+
     # Jobs methods
     def add_job(self, job: Dict[str, Any]) -> Optional[Dict]:
         try:
             result = self._request("POST", "jobs", json=job)
             return result[0] if isinstance(result, list) else result
         except Exception as e:
-            if "duplicate" in str(e).lower():
-                print("⚠️ Duplicate job skipped")
+            err = str(e).lower()
+            if "duplicate" in err or "23505" in err or "409" in err or "conflict" in err:
+                pass  # Expected — 7-day dedup on apply_url
             else:
                 print(f"Error adding job: {e}")
             return None
+
+    def add_jobs_bulk(self, jobs: List[Dict]) -> int:
+        """Bulk insert jobs, falling back to individual on conflict."""
+        if not jobs:
+            return 0
+        inserted = 0
+        for job in jobs:
+            if self.add_job(job):
+                inserted += 1
+        return inserted
     
     def get_jobs(self, **filters) -> List[Dict]:
         params = {}

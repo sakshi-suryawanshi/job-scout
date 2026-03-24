@@ -1,0 +1,484 @@
+# worker/ai/gemini_client.py
+"""
+Gemini 2.0 Flash integration for:
+1. Parsing raw HTML/markdown into structured job listings
+2. Scoring jobs against user criteria (0-100)
+3. Generating "why this fits" explanations
+
+Free tier: 1,500 requests/day via Google AI Studio.
+"""
+
+import os
+import json
+import httpx
+from typing import List, Dict, Optional
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass
+
+
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+
+class GeminiClient:
+    """Lightweight Gemini 2.0 Flash client using REST API (no SDK needed)."""
+
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY must be set")
+        self.client = httpx.Client(timeout=60.0)
+        self.requests_made = 0
+
+    def generate(self, prompt: str, max_tokens: int = 2048) -> Optional[str]:
+        """Send a prompt to Gemini and return the text response."""
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": 0.2,
+            },
+        }
+
+        try:
+            response = self.client.post(
+                f"{GEMINI_API_URL}?key={self.api_key}",
+                json=payload,
+            )
+            response.raise_for_status()
+            self.requests_made += 1
+
+            data = response.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "")
+            return None
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                print("Gemini rate limit hit")
+            elif e.response.status_code == 403:
+                print("Gemini API key invalid")
+            else:
+                print(f"Gemini HTTP error: {e.response.status_code}")
+            return None
+        except Exception as e:
+            print(f"Gemini error: {e}")
+            return None
+
+    def generate_json(self, prompt: str, max_tokens: int = 2048) -> Optional[Dict]:
+        """Send prompt and parse response as JSON."""
+        text = self.generate(prompt, max_tokens)
+        if not text:
+            return None
+
+        # Try to extract JSON from response (Gemini sometimes wraps in markdown)
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Try to find JSON in response
+            import re
+            match = re.search(r'\{[\s\S]*\}|\[[\s\S]*\]', text)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+            print(f"Failed to parse Gemini JSON response: {text[:200]}")
+            return None
+
+
+# ---------------------------------------------------------------------------
+# AI Job Parser — extract structured jobs from raw HTML/text
+# ---------------------------------------------------------------------------
+
+def parse_career_page_with_ai(
+    gemini: GeminiClient,
+    raw_text: str,
+    company_name: str,
+    max_jobs: int = 20,
+) -> List[Dict]:
+    """
+    Use Gemini to extract structured job listings from raw career page text.
+    Returns list of job dicts.
+    """
+    prompt = f"""Extract job listings from this career page text for "{company_name}".
+
+Return a JSON array of job objects. Each job should have:
+- "title": job title (string)
+- "location": location or "Remote" (string)
+- "is_remote": true/false
+- "department": department if mentioned (string or null)
+- "employment_type": "full-time", "part-time", "contract", or null
+- "seniority": "junior", "mid", "senior", "lead", or null
+- "skills": list of technologies/skills mentioned (array of strings)
+- "yoe_min": minimum years of experience if mentioned (number or null)
+- "yoe_max": maximum years of experience if mentioned (number or null)
+- "salary_min": minimum salary if mentioned (number or null)
+- "salary_max": maximum salary if mentioned (number or null)
+
+Only return actual job openings. Ignore navigation, headers, footers.
+Return at most {max_jobs} jobs.
+If no jobs found, return an empty array [].
+
+Career page text:
+{raw_text[:8000]}
+
+JSON response:"""
+
+    result = gemini.generate_json(prompt, max_tokens=3000)
+
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict) and "jobs" in result:
+        return result["jobs"]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Job Scoring — rate 0-100 against user criteria
+# ---------------------------------------------------------------------------
+
+SCORING_PROMPT = """Score this job against the candidate's criteria. Return JSON.
+
+**Candidate criteria:**
+- Title keywords: {title_keywords}
+- Required skills: {required_skills}
+- Preferred remote: {remote_only}
+- Max years of experience: {max_yoe}
+- Extra conditions: {extra_conditions}
+
+**Job details:**
+- Title: {job_title}
+- Company: {company_name}
+- Location: {location}
+- Remote: {is_remote}
+- Source: {source_board}
+- Description: {description}
+
+Return this exact JSON format:
+{{
+    "score": <0-100 integer>,
+    "match_reason": "<1-2 sentence explanation of why this job fits or doesn't fit>",
+    "signals": {{
+        "title_match": <0-25>,
+        "skills_match": <0-25>,
+        "remote_match": <0-25>,
+        "experience_match": <0-25>
+    }}
+}}
+
+Scoring guidelines:
+- 80-100: Strong match (right title, right skills, remote, good YOE range)
+- 60-79: Decent match (most criteria met, minor gaps)
+- 40-59: Partial match (some criteria met, notable gaps)
+- 20-39: Weak match (few criteria met)
+- 0-19: Poor match (wrong field entirely)
+
+JSON response:"""
+
+
+def score_job_with_ai(
+    gemini: GeminiClient,
+    job: Dict,
+    criteria: Dict,
+) -> Optional[Dict]:
+    """
+    Score a single job against criteria using Gemini.
+    Returns {"score": int, "match_reason": str, "signals": dict} or None.
+    """
+    prompt = SCORING_PROMPT.format(
+        title_keywords=", ".join(criteria.get("title_keywords", [])),
+        required_skills=", ".join(criteria.get("required_skills", [])) or "any",
+        remote_only=criteria.get("remote_only", True),
+        max_yoe=criteria.get("max_yoe", 5),
+        extra_conditions=criteria.get("extra_conditions", "none"),
+        job_title=job.get("title", "Unknown"),
+        company_name=job.get("company_name", "Unknown"),
+        location=job.get("location", "Unknown"),
+        is_remote=job.get("is_remote", False),
+        source_board=job.get("source_board", "unknown"),
+        description=(job.get("description") or "")[:3000],
+    )
+
+    return gemini.generate_json(prompt, max_tokens=500)
+
+
+def score_jobs_batch(
+    gemini: GeminiClient,
+    jobs: List[Dict],
+    criteria: Dict,
+    progress_callback=None,
+) -> List[Dict]:
+    """
+    Score multiple jobs. Returns list of jobs with score/reason added.
+    Budget-conscious: batches 5 jobs per API call.
+    """
+    scored = []
+
+    # Batch scoring — 5 jobs per prompt to save API calls
+    batch_size = 5
+    for i in range(0, len(jobs), batch_size):
+        batch = jobs[i:i + batch_size]
+
+        if progress_callback:
+            progress_callback(f"Scoring jobs {i+1}-{min(i+batch_size, len(jobs))}...", i / len(jobs))
+
+        batch_result = _score_batch(gemini, batch, criteria)
+
+        if batch_result:
+            for j, score_data in zip(batch, batch_result):
+                j["match_score"] = score_data.get("score", 0)
+                j["match_reason"] = score_data.get("match_reason", "")
+                scored.append(j)
+        else:
+            # Fallback: add without AI score
+            for j in batch:
+                j["match_score"] = _rule_based_score(j, criteria)
+                j["match_reason"] = "Scored by rules (AI unavailable)"
+                scored.append(j)
+
+    return scored
+
+
+def _score_batch(gemini: GeminiClient, jobs: List[Dict], criteria: Dict) -> Optional[List[Dict]]:
+    """Score a batch of jobs in one API call."""
+    jobs_text = ""
+    for i, j in enumerate(jobs):
+        jobs_text += f"\nJob {i+1}:\n"
+        jobs_text += f"  Title: {j.get('title', 'Unknown')}\n"
+        jobs_text += f"  Company: {j.get('company_name', 'Unknown')}\n"
+        jobs_text += f"  Location: {j.get('location', 'Unknown')}\n"
+        jobs_text += f"  Remote: {j.get('is_remote', False)}\n"
+        desc = (j.get("description") or "")[:500]
+        if desc:
+            jobs_text += f"  Description: {desc}\n"
+
+    prompt = f"""Score these {len(jobs)} jobs against the candidate criteria. Return a JSON array.
+
+**Candidate criteria:**
+- Title keywords: {", ".join(criteria.get("title_keywords", []))}
+- Required skills: {", ".join(criteria.get("required_skills", [])) or "any"}
+- Remote preferred: {criteria.get("remote_only", True)}
+- Max YOE: {criteria.get("max_yoe", 5)}
+- Extra: {criteria.get("extra_conditions", "none")}
+
+**Jobs:**
+{jobs_text}
+
+Return a JSON array with {len(jobs)} objects, one per job, in order:
+[
+  {{"score": <0-100>, "match_reason": "<1 sentence>"}},
+  ...
+]
+
+Scoring: 80-100=strong, 60-79=decent, 40-59=partial, 20-39=weak, 0-19=poor.
+JSON array:"""
+
+    result = gemini.generate_json(prompt, max_tokens=1500)
+
+    if isinstance(result, list) and len(result) == len(jobs):
+        return result
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Rule-Based Scoring (fallback when no AI)
+# ---------------------------------------------------------------------------
+
+def _rule_based_score(job: Dict, criteria: Dict) -> int:
+    """
+    Score a job 0-100 using rules only. No AI needed.
+    This is the fallback when Gemini is not available.
+    """
+    score = 0
+    title = (job.get("title") or "").lower()
+    description = (job.get("description") or "").lower()
+    text = f"{title} {description}"
+
+    # Title match (0-30 points)
+    title_keywords = criteria.get("title_keywords", [])
+    if title_keywords:
+        matches = sum(1 for kw in title_keywords if kw.lower() in title)
+        score += min(30, matches * 10)
+
+    # Skills match (0-30 points)
+    skills = criteria.get("required_skills", [])
+    if skills:
+        matches = sum(1 for s in skills if s.lower() in text)
+        score += min(30, matches * 10)
+    else:
+        score += 15  # No skills specified = neutral
+
+    # Remote match (0-20 points)
+    if criteria.get("remote_only"):
+        if job.get("is_remote"):
+            score += 20
+    else:
+        score += 20  # Not required = full points
+
+    # YOE match (0-20 points)
+    max_yoe = criteria.get("max_yoe")
+    if max_yoe is not None:
+        import re
+        yoe_patterns = re.findall(r"(\d+)\+?\s*(?:years|yrs)", description)
+        if yoe_patterns:
+            min_mentioned = min(int(y) for y in yoe_patterns)
+            if min_mentioned <= max_yoe:
+                score += 20
+            elif min_mentioned <= max_yoe + 2:
+                score += 10
+        else:
+            score += 15  # No YOE mentioned = neutral
+    else:
+        score += 20
+
+    return min(100, score)
+
+
+def score_job_rule_based(job: Dict, criteria: Dict) -> Dict:
+    """Score a job and return score + reason (no AI)."""
+    score = _rule_based_score(job, criteria)
+
+    # Generate reason
+    reasons = []
+    title = (job.get("title") or "").lower()
+
+    title_kws = criteria.get("title_keywords", [])
+    matched_kws = [kw for kw in title_kws if kw.lower() in title]
+    if matched_kws:
+        reasons.append(f"Title matches: {', '.join(matched_kws)}")
+
+    if job.get("is_remote") and criteria.get("remote_only"):
+        reasons.append("Remote")
+
+    skills = criteria.get("required_skills", [])
+    text = f"{title} {(job.get('description') or '').lower()}"
+    matched_skills = [s for s in skills if s.lower() in text]
+    if matched_skills:
+        reasons.append(f"Skills: {', '.join(matched_skills)}")
+
+    return {
+        "score": score,
+        "match_reason": " | ".join(reasons) if reasons else "Basic match",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Unified Scoring Pipeline
+# ---------------------------------------------------------------------------
+
+def score_all_jobs(
+    db,
+    criteria: Dict,
+    use_ai: bool = False,
+    max_jobs: int = 200,
+    progress_callback=None,
+) -> Dict:
+    """
+    Score all unscored jobs in the database.
+    Uses Gemini if available, falls back to rule-based scoring.
+
+    Returns: {"scored": int, "ai_used": bool, "avg_score": float}
+    """
+    # Get unscored jobs (match_score = 0)
+    all_jobs = db.get_jobs(limit=max_jobs)
+    unscored = [j for j in all_jobs if j.get("match_score", 0) == 0]
+
+    if not unscored:
+        return {"scored": 0, "ai_used": False, "avg_score": 0}
+
+    gemini = None
+    ai_available = False
+
+    if use_ai:
+        try:
+            gemini = GeminiClient()
+            ai_available = True
+        except ValueError:
+            print("Gemini API key not set — using rule-based scoring")
+
+    scored_count = 0
+    total_score = 0
+
+    if ai_available and gemini:
+        # AI scoring in batches
+        batch_size = 5
+        for i in range(0, len(unscored), batch_size):
+            batch = unscored[i:i + batch_size]
+
+            if progress_callback:
+                progress_callback(f"AI scoring {i+1}-{min(i+batch_size, len(unscored))}...", i / len(unscored))
+
+            # Prepare job data for scoring
+            job_dicts = []
+            for j in batch:
+                company_info = j.get("companies", {}) or {}
+                job_dicts.append({
+                    "title": j.get("title", ""),
+                    "company_name": company_info.get("name", "Unknown"),
+                    "location": j.get("location", ""),
+                    "is_remote": j.get("is_remote", False),
+                    "source_board": j.get("source_board", ""),
+                    "description": "",  # We don't store descriptions in DB
+                })
+
+            batch_scores = _score_batch(gemini, job_dicts, criteria)
+
+            if batch_scores:
+                for j, score_data in zip(batch, batch_scores):
+                    score = score_data.get("score", 0)
+                    reason = score_data.get("match_reason", "")
+                    _update_job_score(db, j["id"], score, reason)
+                    scored_count += 1
+                    total_score += score
+            else:
+                # Fallback for this batch
+                for j in batch:
+                    result = score_job_rule_based(j, criteria)
+                    _update_job_score(db, j["id"], result["score"], result["match_reason"])
+                    scored_count += 1
+                    total_score += result["score"]
+    else:
+        # Pure rule-based scoring
+        for i, j in enumerate(unscored):
+            if progress_callback:
+                progress_callback(f"Scoring job {i+1}/{len(unscored)}...", i / len(unscored))
+
+            result = score_job_rule_based(j, criteria)
+            _update_job_score(db, j["id"], result["score"], result["match_reason"])
+            scored_count += 1
+            total_score += result["score"]
+
+    if progress_callback:
+        progress_callback("Scoring complete!", 1.0)
+
+    avg = total_score / scored_count if scored_count > 0 else 0
+    return {"scored": scored_count, "ai_used": ai_available, "avg_score": round(avg, 1)}
+
+
+def _update_job_score(db, job_id: str, score: int, reason: str):
+    """Update a job's score and reason in the database."""
+    try:
+        updates = {
+            "match_score": score,
+            "match_reason": reason,
+            "is_recommended": score >= 70,
+        }
+        db._request("PATCH", f"jobs?id=eq.{job_id}", json=updates)
+    except Exception as e:
+        print(f"Error updating score for {job_id}: {e}")
