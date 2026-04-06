@@ -3,19 +3,22 @@ __pycache__/
 *.py[cod]
 *.so
 .Python
-env/
-venv/
-.env
-.venv
 *.egg-info/
 dist/
 build/
 
-# Supabase / secrets
+# Secrets
+.env
 .env.local
 .env.*.local
+.streamlit/secrets.toml
 *.key
 *.pem
+
+# Virtual env (legacy, now using Docker)
+env/
+venv/
+.venv/
 
 # Scraping logs / data
 *.log
@@ -32,14 +35,5 @@ data/*.json
 .DS_Store
 Thumbs.db
 
-# Optional: if you store scraped jobs
+# Scraped job cache
 jobs_cache/
-
-
-# .gitignore
-.env
-.streamlit/secrets.toml
-__pycache__/
-*.pyc
-.venv/
-venv/
