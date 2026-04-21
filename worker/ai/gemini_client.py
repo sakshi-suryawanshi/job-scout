@@ -4,6 +4,7 @@ Gemini 2.0 Flash integration for:
 1. Parsing raw HTML/markdown into structured job listings
 2. Scoring jobs against user criteria (0-100)
 3. Generating "why this fits" explanations
+4. Tailoring resumes per job description
 
 Free tier: 1,500 requests/day via Google AI Studio.
 """
@@ -464,6 +465,18 @@ def score_all_jobs(
             scored_count += 1
             total_score += result["score"]
 
+    # Also compute desperation scores for all jobs (not just unscored)
+    try:
+        from worker.signals.desperation_detector import compute_desperation_for_jobs
+        all_for_desp = db.get_jobs(limit=max_jobs)
+        no_desp = [j for j in all_for_desp if not j.get("desperation_score")]
+        if no_desp:
+            if progress_callback:
+                progress_callback("Computing desperation signals...", 0.95)
+            compute_desperation_for_jobs(db, no_desp)
+    except Exception as e:
+        print(f"Desperation scoring error (non-fatal): {e}")
+
     if progress_callback:
         progress_callback("Scoring complete!", 1.0)
 
@@ -482,3 +495,127 @@ def _update_job_score(db, job_id: str, score: int, reason: str):
         db._request("PATCH", f"jobs?id=eq.{job_id}", json=updates)
     except Exception as e:
         print(f"Error updating score for {job_id}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Resume Tailoring
+# ---------------------------------------------------------------------------
+
+TAILOR_PROMPT = """You are an expert resume writer. Tailor the candidate's resume for a specific job.
+
+**Job details:**
+- Title: {job_title}
+- Company: {company_name}
+- Location: {location}
+- Remote: {is_remote}
+- Source board: {source_board}
+{description_section}
+
+**Candidate's base resume:**
+{resume_text}
+
+Rewrite the resume so it is tailored to this job. Rules:
+1. Keep ALL facts true — do not invent experience or skills the candidate doesn't have.
+2. Reorder bullet points to surface the most relevant experience first.
+3. Adjust the summary/objective to mention the role title and company.
+4. Emphasize skills and tools that match the job.
+5. Keep the same overall structure and length.
+6. Output plain text only — no markdown, no JSON, no explanation.
+
+Tailored resume:"""
+
+
+def tailor_resume(
+    gemini: "GeminiClient",
+    resume_text: str,
+    job: Dict,
+    job_description: str = "",
+) -> Optional[str]:
+    """
+    Tailor a resume to a specific job using Gemini.
+    Returns plain-text tailored resume or None on failure.
+    """
+    company_info = job.get("companies", {}) or {}
+    company_name = company_info.get("name", "") or job.get("company_name", "Unknown")
+
+    description_section = ""
+    if job_description.strip():
+        description_section = f"- Description excerpt:\n{job_description[:2000]}"
+
+    prompt = TAILOR_PROMPT.format(
+        job_title=job.get("title", "Unknown"),
+        company_name=company_name,
+        location=job.get("location", "Remote"),
+        is_remote=job.get("is_remote", True),
+        source_board=job.get("source_board", ""),
+        description_section=description_section,
+        resume_text=resume_text[:4000],
+    )
+
+    return gemini.generate(prompt, max_tokens=3000)
+
+
+def fetch_job_description(apply_url: str, timeout: int = 10) -> str:
+    """
+    Attempt to fetch plain text from a job's apply URL to use as description.
+    Returns empty string on any failure — this is best-effort only.
+    """
+    if not apply_url:
+        return ""
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+
+        resp = httpx.get(apply_url, timeout=timeout, follow_redirects=True, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; JobScout/1.0)"
+        })
+        if resp.status_code != 200:
+            return ""
+        soup = BeautifulSoup(resp.text, "lxml")
+        # Remove nav/footer noise
+        for tag in soup(["nav", "footer", "header", "script", "style"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        # Return first 3000 chars — enough context for tailoring
+        return text[:3000]
+    except Exception:
+        return ""
+
+
+def generate_resume_html(tailored_text: str, job_title: str, company_name: str) -> str:
+    """
+    Wrap tailored resume plain text in a print-ready HTML page.
+    User can open in browser → Print → Save as PDF (no extra libraries needed).
+    """
+    import html as html_lib
+    safe_text = html_lib.escape(tailored_text)
+    # Preserve line breaks
+    safe_text = safe_text.replace("\n\n", "</p><p>").replace("\n", "<br>")
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Resume — {html_lib.escape(job_title)} at {html_lib.escape(company_name)}</title>
+<style>
+  body {{
+    font-family: 'Georgia', serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    max-width: 750px;
+    margin: 40px auto;
+    color: #111;
+  }}
+  h1 {{ font-size: 16pt; margin-bottom: 2px; }}
+  .meta {{ font-size: 9pt; color: #555; margin-bottom: 20px; }}
+  p {{ margin: 6px 0; }}
+  @media print {{
+    body {{ margin: 20px; }}
+  }}
+</style>
+</head>
+<body>
+<div class="meta">Tailored for: <strong>{html_lib.escape(job_title)}</strong> at <strong>{html_lib.escape(company_name)}</strong></div>
+<p>{safe_text}</p>
+</body>
+</html>"""

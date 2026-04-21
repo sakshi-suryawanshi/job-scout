@@ -146,13 +146,54 @@ class Database:
                 print(f"Error adding job: {e}")
             return None
 
+    def get_job_by_fingerprint(self, fingerprint: str) -> Optional[Dict]:
+        """Find a job by its dedup fingerprint."""
+        try:
+            result = self._request("GET", "jobs", params={
+                "fingerprint": f"eq.{fingerprint}",
+                "limit": 1,
+            })
+            return result[0] if result else None
+        except Exception:
+            return None
+
+    def upsert_job(self, job: Dict[str, Any]) -> Optional[Dict]:
+        """
+        Insert a job, deduplicating by fingerprint.
+        If a job with the same fingerprint exists, merge source_boards.
+        Returns the job dict if newly inserted, None if duplicate/merged.
+        """
+        fingerprint = job.get("fingerprint")
+        if fingerprint:
+            existing = self.get_job_by_fingerprint(fingerprint)
+            if existing:
+                # Merge source_boards
+                new_source = job.get("source_board", "")
+                existing_boards = existing.get("source_boards", "") or ""
+                boards_list = [b.strip() for b in existing_boards.split(",") if b.strip()]
+                if new_source and new_source not in boards_list:
+                    boards_list.append(new_source)
+                    try:
+                        self._request("PATCH", f"jobs?id=eq.{existing['id']}", json={
+                            "source_boards": ",".join(boards_list),
+                        })
+                    except Exception:
+                        pass
+                return None  # Not a new insert
+
+        # Set source_boards from source_board on first insert
+        if "source_board" in job and not job.get("source_boards"):
+            job["source_boards"] = job["source_board"]
+
+        return self.add_job(job)
+
     def add_jobs_bulk(self, jobs: List[Dict]) -> int:
-        """Bulk insert jobs, falling back to individual on conflict."""
+        """Bulk insert jobs using upsert so multi-board signals are tracked."""
         if not jobs:
             return 0
         inserted = 0
         for job in jobs:
-            if self.add_job(job):
+            if self.upsert_job(job):
                 inserted += 1
         return inserted
     
@@ -168,12 +209,14 @@ class Database:
         if filters.get("min_score"):
             params["match_score"] = f"gte.{filters['min_score']}"
         
-        # 7-day filter
+        # Default: only jobs discovered in last 6 months. Pass days=0 to disable.
         from datetime import datetime, timedelta
-        cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        params["discovered_date"] = f"gte.{cutoff}"
-        
-        params["limit"] = filters.get("limit", 100)
+        days = filters.get("days", 180)
+        if days and days > 0:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            params["discovered_date"] = f"gte.{cutoff}"
+
+        params["limit"] = filters.get("limit", 500)
         params["order"] = "discovered_at.desc"
         
         try:
@@ -193,6 +236,61 @@ class Database:
             return True
         except Exception as e:
             print(f"Error marking job: {e}")
+            return False
+
+    def mark_job_applied(self, job_id: str, notes: str = None) -> bool:
+        """Mark a job as applied with timestamp and auto-set follow-up date."""
+        updates = {
+            "user_action": "applied",
+            "is_new": False,
+            "applied_date": datetime.now().isoformat(),
+            "follow_up_date": (datetime.now() + timedelta(days=5)).isoformat(),
+        }
+        if notes:
+            updates["application_notes"] = notes
+        try:
+            self._request("PATCH", f"jobs?id=eq.{job_id}", json=updates)
+            return True
+        except Exception as e:
+            print(f"Error marking applied: {e}")
+            return False
+
+    def get_apply_queue(self, limit: int = 500) -> List[Dict]:
+        """Get top jobs to apply to — includes unseen and saved jobs, sorted by score."""
+        try:
+            # PostgREST: user_action is null OR saved
+            return self._request("GET", "jobs", params={
+                "user_action": "in.(null,saved)",
+                "order": "match_score.desc",
+                "limit": limit,
+                "select": "*,companies(name,website)",
+            }) or []
+        except Exception as e:
+            print(f"Error getting apply queue: {e}")
+            return []
+
+    def get_follow_ups_due(self) -> List[Dict]:
+        """Get applied jobs where follow-up is due."""
+        cutoff = datetime.now().isoformat()
+        try:
+            return self._request("GET", "jobs", params={
+                "user_action": "eq.applied",
+                "follow_up_date": f"lte.{cutoff}",
+                "order": "follow_up_date.asc",
+                "select": "*,companies(name,website)",
+            }) or []
+        except Exception as e:
+            print(f"Error getting follow-ups: {e}")
+            return []
+
+    def snooze_follow_up(self, job_id: str, days: int = 3) -> bool:
+        """Push follow-up date forward."""
+        try:
+            self._request("PATCH", f"jobs?id=eq.{job_id}", json={
+                "follow_up_date": (datetime.now() + timedelta(days=days)).isoformat(),
+            })
+            return True
+        except Exception:
             return False
     
     # Signals methods

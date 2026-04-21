@@ -53,6 +53,7 @@ with tab1:
         )
     with col2:
         remote_only = st.checkbox("Remote only", value=True)
+        global_remote = st.checkbox("Global remote only (exclude US-only, India-based)", value=True)
         max_yoe = st.slider("Max years of experience", 0, 15, 5)
 
     criteria = {
@@ -60,6 +61,7 @@ with tab1:
         "required_skills": [k.strip() for k in required_skills.split(",") if k.strip()],
         "exclude_keywords": [k.strip() for k in exclude_keywords.split(",") if k.strip()],
         "remote_only": remote_only,
+        "global_remote_only": global_remote,
         "max_yoe": max_yoe,
     }
 
@@ -85,6 +87,9 @@ with tab1:
         board_hn_jobs = st.checkbox("HN Job Stories (YC companies)", value=True, key="b_hnj")
         board_reddit = st.checkbox("Reddit (r/forhire)", value=False, key="b_rdt")
         board_himalayas = st.checkbox("Himalayas (~100 jobs)", value=True, key="b_him")
+        board_arbeitnow = st.checkbox("Arbeitnow (~100 jobs, EU+worldwide)", value=True, key="b_arb")
+        board_jobicy = st.checkbox("Jobicy (~50 jobs, small board)", value=True, key="b_jcy")
+        board_themuse = st.checkbox("The Muse (~100 jobs, startups)", value=True, key="b_muse")
 
     st.write("**Career Pages** (scrape company websites directly)")
     scrape_careers = st.checkbox("Scrape career pages of DB companies (custom/unknown ATS)", value=False, key="cp_on")
@@ -116,6 +121,12 @@ with tab1:
         boards.append("reddit")
     if board_himalayas:
         boards.append("himalayas")
+    if board_arbeitnow:
+        boards.append("arbeitnow")
+    if board_jobicy:
+        boards.append("jobicy")
+    if board_themuse:
+        boards.append("themuse")
 
     total_sources = len(ats_types) + len(boards) + (1 if scrape_careers else 0)
     phases = sum([bool(ats_types), bool(boards), scrape_careers])
@@ -246,14 +257,15 @@ with tab2:
         filter_new = st.selectbox("Status", ["All", "New Only", "Saved", "Applied", "Rejected"])
     with fcol2:
         all_sources = ["All", "greenhouse", "lever", "ashby", "remoteok", "remotive",
-                       "weworkremotely", "hackernews", "hackernews_jobs", "reddit_forhire", "himalayas", "career_page"]
+                       "weworkremotely", "hackernews", "hackernews_jobs", "reddit_forhire",
+                       "himalayas", "arbeitnow", "jobicy", "themuse", "career_page"]
         filter_source = st.selectbox("Source", all_sources)
     with fcol3:
         filter_remote = st.selectbox("Location", ["All", "Remote Only"])
     with fcol4:
         search_text = st.text_input("Search title", "")
     with fcol5:
-        sort_by = st.selectbox("Sort by", ["Score (high first)", "Score (low first)", "Newest", "Recommended"])
+        sort_by = st.selectbox("Sort by", ["Score (high first)", "Score (low first)", "Newest", "Recommended", "Desperation (high first)"])
 
     job_filters = {"limit": 500}
     if filter_new == "New Only":
@@ -286,6 +298,8 @@ with tab2:
         jobs.sort(key=lambda j: j.get("match_score", 0))
     elif sort_by == "Recommended":
         jobs.sort(key=lambda j: (j.get("is_recommended", False), j.get("match_score", 0)), reverse=True)
+    elif sort_by == "Desperation (high first)":
+        jobs.sort(key=lambda j: (j.get("desperation_score", 0) or 0), reverse=True)
     # Newest = default DB order
 
     st.write(f"Showing **{len(jobs)}** jobs")
@@ -322,8 +336,20 @@ with tab2:
                     st.write(f"**Company:** {company_name}")
                     st.write(f"**Location:** {job.get('location', 'N/A')}")
                     st.write(f"**Remote:** {'Yes' if job.get('is_remote') else 'No'}")
-                    st.write(f"**Source:** {job.get('source_board', 'unknown')}")
+                    # Show all sources this job was found on
+                    source_boards = job.get("source_boards", "") or ""
+                    if "," in source_boards:
+                        st.write(f"**Found on:** {source_boards}")
+                    else:
+                        st.write(f"**Source:** {job.get('source_board', 'unknown')}")
                     st.write(f"**Found:** {str(job.get('discovered_at', ''))[:10]}")
+
+                    # Desperation signal
+                    desp_score = job.get("desperation_score", 0) or 0
+                    if desp_score >= 60:
+                        st.warning(f"Desperation: **{desp_score}/100** — Likely eager to hire!")
+                    elif desp_score >= 30:
+                        st.info(f"Desperation: **{desp_score}/100**")
 
                     # Show score and match reason
                     if score > 0:

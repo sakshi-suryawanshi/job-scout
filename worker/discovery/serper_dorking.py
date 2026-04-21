@@ -24,81 +24,90 @@ SERPER_API_URL = "https://google.serper.dev/search"
 # Each returns a list of (query_string, category) tuples.
 # Categories help prioritize and tag discovered companies.
 
-DORK_QUERIES = {
-    "ats_hiring": [
-        # Greenhouse jobs - seed/early startups actively hiring
-        ('site:boards.greenhouse.io "remote" "engineer"', "greenhouse"),
-        ('site:boards.greenhouse.io "worldwide" "developer"', "greenhouse"),
-        ('site:boards.greenhouse.io "backend" "startup"', "greenhouse"),
-        ('site:boards.greenhouse.io "python" OR "golang" remote', "greenhouse"),
-        # Lever jobs
-        ('site:jobs.lever.co "remote" "engineer"', "lever"),
-        ('site:jobs.lever.co "backend" "python" OR "go"', "lever"),
-        ('site:jobs.lever.co "fully remote" "developer"', "lever"),
-        # Ashby
-        ('site:jobs.ashbyhq.com "remote" "engineer"', "ashby"),
-        ('site:jobs.ashbyhq.com "backend" OR "fullstack"', "ashby"),
-    ],
-    "job_boards": [
-        # Wellfound (AngelList) - seed stage hiring
-        ('site:wellfound.com "seed" "hiring" "remote"', "wellfound"),
-        ('site:wellfound.com "pre-seed" "engineer" "remote"', "wellfound"),
-        ('site:wellfound.com "series a" "backend" "remote"', "wellfound"),
-        # Startup-focused boards
-        ('site:weworkremotely.com "startup" "backend" OR "python"', "weworkremotely"),
-        ('site:remoteok.com "startup" "engineer"', "remoteok"),
-        ('site:remotive.com "startup" "developer" "remote"', "remotive"),
-        ('site:himalayas.app "startup" "engineer" "remote"', "himalayas"),
-        ('site:justremote.co "startup" "developer"', "justremote"),
-    ],
-    "career_pages": [
-        # Direct career pages of small companies
-        ('intitle:"careers" "we are hiring" "remote" "seed" "startup"', "career_page"),
-        ('intitle:"jobs" "join our team" "remote" "series a" "engineer"', "career_page"),
-        ('intitle:"careers" "small team" "remote" "developer" -enterprise', "career_page"),
-        ('intitle:"open positions" "remote" "startup" "backend"', "career_page"),
-        ('"we\'re hiring" "remote" "early stage" "engineer" -linkedin', "career_page"),
-        ('"join us" "remote" "seed funded" "developer"', "career_page"),
-    ],
-    "distress_signals": [
-        # Companies desperately looking for help
-        ('site:news.ycombinator.com "hiring" "urgently" OR "desperately" "remote"', "hackernews"),
-        ('site:news.ycombinator.com "who is hiring" "remote" "backend"', "hackernews"),
-        ('site:indiehackers.com "looking for" "developer" OR "engineer" "cofounder"', "indiehackers"),
-        ('site:indiehackers.com "need help" "developer" "growing"', "indiehackers"),
-        ('"overwhelmed" "need developer" "startup" "remote" -linkedin', "distress"),
-        ('"growing fast" "hiring" "remote" "startup" "engineer" -enterprise', "distress"),
-    ],
-    "funding_signals": [
-        # Recently funded startups that will need to hire
-        ('"raised" "seed" "million" "hiring" "remote" 2025 OR 2026', "funding"),
-        ('"series a" "raised" "hiring" "engineer" "remote" 2025 OR 2026', "funding"),
-        ('"pre-seed" "funding" "hiring" "developer" "remote"', "funding"),
-        ('site:techcrunch.com "raises" "seed" 2025 OR 2026 "remote"', "funding"),
-        ('site:crunchbase.com "seed" "remote" "hiring"', "funding"),
-    ],
-    "hidden_gems": [
-        # Obscure companies in unusual markets (like Wassha)
-        ('"hiring" "remote" "developer" "africa" startup', "hidden"),
-        ('"hiring" "remote" "engineer" "southeast asia" startup', "hidden"),
-        ('"hiring" "remote" "developer" "latin america" startup', "hidden"),
-        ('"hiring" "remote" "engineer" site:angel.co OR site:wellfound.com "<50 employees"', "hidden"),
-        ('intitle:"careers" "remote" "developing countries" OR "emerging markets" "engineer"', "hidden"),
-        ('"hiring" "remote" "engineer" "impact" "startup" -faang -google -meta', "hidden"),
-    ],
-    "github_signals": [
-        # Active open source companies that might hire
-        ('site:github.com "we are hiring" "remote" "backend" "startup"', "github"),
-        ('site:github.com "contributors welcome" "hiring" "remote"', "github"),
-    ],
-    "regional_gems": [
-        # Japan/Africa/SEA hidden companies
-        ('"hiring" "remote" "engineer" "japan" "startup" -tokyo', "regional"),
-        ('"hiring" "remote" "developer" "kenya" OR "nigeria" OR "tanzania" startup', "regional"),
-        ('"hiring" "remote" "engineer" "india" "seed" OR "series a" startup', "regional"),
-        ('"hiring" "remote" "developer" "estonia" OR "portugal" OR "poland" startup', "regional"),
-    ],
-}
+def _build_dork_queries() -> dict:
+    """Build dork queries with dynamic year so they never go stale."""
+    from datetime import datetime
+    y = datetime.now().year
+    yr = f"{y} OR {y + 1}"
+
+    return {
+        "ats_hiring": [
+            ('site:boards.greenhouse.io "remote" "engineer"', "greenhouse"),
+            ('site:boards.greenhouse.io "worldwide" "developer"', "greenhouse"),
+            ('site:boards.greenhouse.io "backend" "startup"', "greenhouse"),
+            ('site:boards.greenhouse.io "python" OR "golang" remote', "greenhouse"),
+            ('site:jobs.lever.co "remote" "engineer"', "lever"),
+            ('site:jobs.lever.co "backend" "python" OR "go"', "lever"),
+            ('site:jobs.ashbyhq.com "remote" "engineer"', "ashby"),
+            ('site:jobs.ashbyhq.com "backend" OR "fullstack"', "ashby"),
+            ('site:jobs.ashbyhq.com "worldwide" "developer"', "ashby"),
+        ],
+        "job_boards": [
+            ('site:wellfound.com "1-10 employees" "remote" "engineer"', "wellfound"),
+            ('site:wellfound.com "11-50 employees" "remote" "backend"', "wellfound"),
+            ('site:wellfound.com "seed" "hiring" "remote"', "wellfound"),
+            ('site:wellfound.com "pre-seed" "engineer" "remote"', "wellfound"),
+            ('site:weworkremotely.com "startup" "backend" OR "python"', "weworkremotely"),
+            ('site:himalayas.app "startup" "engineer" "remote"', "himalayas"),
+            ('site:arbeitnow.com "remote" "engineer" "startup"', "arbeitnow"),
+            ('site:jobicy.com "remote" "developer" "startup"', "jobicy"),
+        ],
+        "career_pages": [
+            ('intitle:"careers" "we are hiring" "remote" "seed" "startup"', "career_page"),
+            ('intitle:"jobs" "join our team" "remote" "series a" "engineer"', "career_page"),
+            ('intitle:"careers" "small team" "remote" "developer" -enterprise', "career_page"),
+            ('intitle:"open positions" "remote" "startup" "backend"', "career_page"),
+            ('"we\'re hiring" "remote" "early stage" "engineer" -linkedin', "career_page"),
+            ('"join us" "remote" "seed funded" "developer"', "career_page"),
+        ],
+        "distress_signals": [
+            ('site:news.ycombinator.com "who is hiring" "remote" "backend"', "hackernews"),
+            ('site:news.ycombinator.com "who is hiring" "remote" "python"', "hackernews"),
+            ('site:indiehackers.com "looking for" "developer" OR "engineer"', "indiehackers"),
+            ('site:indiehackers.com "need help" "developer" "growing"', "indiehackers"),
+            ('"growing fast" "need engineer" "remote" "startup" -enterprise', "distress"),
+        ],
+        "funding_signals": [
+            (f'"raised" "seed" "million" "hiring" "remote" {yr}', "funding"),
+            (f'"series a" "raised" "hiring" "engineer" "remote" {yr}', "funding"),
+            ('"pre-seed" "funding" "hiring" "developer" "remote"', "funding"),
+            (f'site:techcrunch.com "raises" "seed" {yr} "remote"', "funding"),
+            (f'"just raised" "hiring" "engineer" "remote" {yr}', "funding"),
+            (f'"recently funded" "hiring" "developer" "remote" {yr}', "funding"),
+        ],
+        "hidden_gems": [
+            ('"hiring" "remote" "developer" "africa" startup -linkedin', "hidden"),
+            ('"hiring" "remote" "engineer" "southeast asia" startup -linkedin', "hidden"),
+            ('"hiring" "remote" "developer" "latin america" startup -linkedin', "hidden"),
+            ('site:wellfound.com "1-10 employees" "remote" "backend"', "hidden"),
+            ('intitle:"careers" "remote" "emerging markets" OR "developing countries" "engineer"', "hidden"),
+            ('"hiring" "remote" "impact" "startup" "engineer" -google -meta -amazon -apple', "hidden"),
+        ],
+        "github_signals": [
+            ('site:github.com "we are hiring" "remote" "backend" "startup"', "github"),
+            ('site:github.com "join our team" "remote" "engineer" "hiring"', "github"),
+        ],
+        "regional_gems": [
+            ('"hiring" "remote" "engineer" "japan" "startup"', "regional"),
+            ('"hiring" "remote" "developer" "kenya" OR "nigeria" OR "ghana" startup', "regional"),
+            ('"hiring" "remote" "developer" "estonia" OR "portugal" OR "poland" startup', "regional"),
+            ('"hiring" "remote" "engineer" "singapore" OR "indonesia" startup', "regional"),
+        ],
+        "yc_latest": [
+            (f'site:news.ycombinator.com "YC W{str(y)[-2:]} OR YC S{str(y)[-2:]}" "hiring" "remote"', "yc"),
+            ('site:boards.greenhouse.io "YC" "remote" "engineer" "seed"', "yc"),
+            ('site:jobs.ashbyhq.com "YC" "remote" "backend"', "yc"),
+        ],
+        "twitter_x": [
+            ('site:x.com "hiring" "remote" "backend engineer" "startup" "apply"', "twitter"),
+            ('site:x.com "we are hiring" "remote" "developer" "startup"', "twitter"),
+            ('site:x.com "job opening" "remote" "engineer" "startup" "DM"', "twitter"),
+            ('site:twitter.com "hiring" "remote" "backend" "startup" "apply now"', "twitter"),
+            ('site:x.com "looking for" "engineer" "remote" "seed" OR "series a"', "twitter"),
+        ],
+    }
+
+DORK_QUERIES = _build_dork_queries()
 
 
 class SerperDorker:
@@ -263,7 +272,7 @@ class SerperDorker:
                 company = self.extract_company_from_ashby(url, title)
             elif "wellfound.com" in url:
                 company = self.extract_company_from_wellfound(url, title, snippet)
-            elif category in ("career_page", "hidden", "regional", "distress", "funding"):
+            elif category in ("career_page", "hidden", "regional", "distress", "funding", "twitter", "yc", "indiehackers", "hackernews"):
                 company = self.extract_company_from_generic(url, title, snippet)
 
             if company:
@@ -302,6 +311,10 @@ class SerperDorker:
             "remotive": 6,
             "himalayas": 6,
             "justremote": 6,
+            "yc": 9,
+            "arbeitnow": 6,
+            "jobicy": 6,
+            "twitter": 8,
         }
 
         return {
@@ -319,7 +332,9 @@ class SerperDorker:
         self, category: str, max_queries: int = None, results_per_query: int = 10
     ) -> List[Dict]:
         """Run all dork queries for a category."""
-        queries = DORK_QUERIES.get(category, [])
+        # Rebuild queries each call so year tokens stay current
+        live_queries = _build_dork_queries()
+        queries = live_queries.get(category, [])
         if not queries:
             print(f"Unknown category: {category}")
             return []

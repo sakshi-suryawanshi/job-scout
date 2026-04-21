@@ -51,13 +51,15 @@ with tab1:
 
     category_descriptions = {
         "ats_hiring": "🏢 ATS Boards (Greenhouse, Lever, Ashby) — direct job listings",
-        "job_boards": "📋 Job Boards (Wellfound, WWR, RemoteOK, etc.)",
+        "job_boards": "📋 Job Boards (Wellfound 1-10 employees, WWR, Arbeitnow, Jobicy)",
         "career_pages": "🌐 Career Pages — direct company career pages",
-        "distress_signals": "🚨 Distress Signals — companies desperately hiring",
-        "funding_signals": "💰 Funding Signals — recently funded startups",
-        "hidden_gems": "💎 Hidden Gems — obscure companies in unusual markets",
+        "distress_signals": "🚨 Distress Signals — founding engineers, solo founders, desperate hiring",
+        "funding_signals": "💰 Funding Signals — recently funded startups (dynamic year)",
+        "hidden_gems": "💎 Hidden Gems — founding engineer roles, first hires, obscure markets",
         "github_signals": "🐙 GitHub Signals — active open source companies",
         "regional_gems": "🌍 Regional Gems — Japan, Africa, SEA, Eastern Europe",
+        "yc_latest": "🚀 Latest YC Batch — newest YC companies hiring remotely",
+        "twitter_x": "🐦 Twitter/X — startups posting hiring on X (via Serper)",
     }
 
     col1, col2 = st.columns(2)
@@ -66,7 +68,7 @@ with tab1:
     for i, (cat, desc) in enumerate(category_descriptions.items()):
         target_col = col1 if i % 2 == 0 else col2
         with target_col:
-            if st.checkbox(desc, value=cat in ("ats_hiring", "hidden_gems", "distress_signals"), key=f"cat_{cat}"):
+            if st.checkbox(desc, value=cat in ("distress_signals", "hidden_gems", "funding_signals", "yc_latest", "job_boards"), key=f"cat_{cat}"):
                 selected_categories.append(cat)
 
     # Budget controls

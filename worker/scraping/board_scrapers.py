@@ -42,13 +42,20 @@ def _now() -> str:
 
 def to_db_job(job: Dict, company_id: Optional[str] = None) -> Dict:
     """Convert a scraped job to the DB jobs table format."""
+    from worker.scraping.dedup import generate_job_fingerprint
+
+    title = job.get("title", "")[:500]
+    company_name = job.get("company_name", "")
+    fingerprint = generate_job_fingerprint(title, company_name) if company_name else None
+
     return {
         "company_id": company_id,
-        "title": job.get("title", "")[:500],
+        "title": title,
         "location": job.get("location", "")[:500],
         "is_remote": job.get("is_remote", False),
         "apply_url": job.get("apply_url", ""),
         "source_board": job.get("source_board", "unknown"),
+        "fingerprint": fingerprint,
         "match_score": 0,
         "is_new": True,
         "is_recommended": False,
@@ -478,6 +485,128 @@ class HimalayasScraper:
 # HN Jobs (Firebase) — YC startup dedicated job posts
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Arbeitnow — free REST API, strong EU + worldwide remote coverage
+# ---------------------------------------------------------------------------
+
+class ArbeitnowScraper:
+    """https://arbeitnow.com/api/job-board-api — free, no auth, EU+remote focus."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            response = client.get("https://arbeitnow.com/api/job-board-api")
+            response.raise_for_status()
+            data = response.json()
+
+            jobs = []
+            for item in data.get("data", [])[:limit]:
+                tags = item.get("tags", [])
+                is_remote = item.get("remote", False) or _is_remote(
+                    item.get("location", ""), item.get("title", "")
+                )
+                jobs.append({
+                    "title": item.get("title", ""),
+                    "company_name": item.get("company_name", "Unknown"),
+                    "location": item.get("location", "Remote"),
+                    "is_remote": is_remote,
+                    "apply_url": item.get("url", ""),
+                    "description": _clean_html(item.get("description", ""))[:5000],
+                    "source_board": "arbeitnow",
+                    "tags": tags,
+                    "posted_at": item.get("created_at"),
+                })
+            return jobs
+        except Exception as e:
+            print(f"Arbeitnow error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# Jobicy — free API, small board = less competition
+# ---------------------------------------------------------------------------
+
+class JobicyScraper:
+    """https://jobicy.com/api/v0/remote-jobs — free, remote-only."""
+
+    def get_jobs(self, limit: int = 50) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            response = client.get(
+                "https://jobicy.com/api/v0/remote-jobs",
+                params={"count": limit, "geo": "worldwide", "industry": "engineering"},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            jobs = []
+            for item in data.get("jobs", []):
+                jobs.append({
+                    "title": item.get("jobTitle", ""),
+                    "company_name": item.get("companyName", "Unknown"),
+                    "location": item.get("jobGeo", "Worldwide"),
+                    "is_remote": True,
+                    "apply_url": item.get("url", ""),
+                    "description": _clean_html(item.get("jobDescription", ""))[:5000],
+                    "source_board": "jobicy",
+                    "salary": item.get("annualSalaryMin", ""),
+                    "posted_at": item.get("pubDate"),
+                })
+            return jobs
+        except Exception as e:
+            print(f"Jobicy error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# The Muse — free public API, startup + mid-size company focus
+# ---------------------------------------------------------------------------
+
+class TheMuseScraper:
+    """https://www.themuse.com/api/public/jobs — free, startup/mid-size companies."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            response = client.get(
+                "https://www.themuse.com/api/public/jobs",
+                params={
+                    "category": "Engineering",
+                    "level": "Entry Level,Mid Level,Senior Level",
+                    "page": 0,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            jobs = []
+            for item in data.get("results", [])[:limit]:
+                locations = item.get("locations", [])
+                loc_names = [l.get("name", "") for l in locations]
+                location = ", ".join(loc_names) or "Remote"
+                is_remote = any("remote" in l.lower() for l in loc_names) or _is_remote(
+                    location, item.get("name", "")
+                )
+
+                company = item.get("company", {})
+                apply_url = item.get("refs", {}).get("landing_page", "")
+
+                jobs.append({
+                    "title": item.get("name", ""),
+                    "company_name": company.get("name", "Unknown"),
+                    "location": location,
+                    "is_remote": is_remote,
+                    "apply_url": apply_url,
+                    "description": _clean_html(item.get("contents", ""))[:5000],
+                    "source_board": "themuse",
+                    "posted_at": item.get("publication_date"),
+                })
+            return jobs
+        except Exception as e:
+            print(f"The Muse error: {e}")
+            return []
+
+
 class HNJobStoriesScraper:
     """Dedicated HN /jobstories — YC company job posts."""
 
@@ -536,12 +665,17 @@ def _parse_hn_title(title: str) -> tuple:
 
 def matches_criteria(job: Dict, criteria: Dict) -> bool:
     """Check if a job matches user criteria."""
+    from worker.scraping.dedup import is_globally_remote
+
     title = (job.get("title") or "").lower()
     description = (job.get("description") or "").lower()
     location = (job.get("location") or "").lower()
     text = f"{title} {description} {location}"
 
     if criteria.get("remote_only") and not job.get("is_remote"):
+        return False
+
+    if criteria.get("global_remote_only") and not is_globally_remote(job):
         return False
 
     title_keywords = criteria.get("title_keywords", [])
@@ -609,6 +743,9 @@ def scrape_board_jobs(
         "hackernews_jobs": ("HN Job Stories", lambda: HNJobStoriesScraper().get_jobs(limit=50)),
         "reddit": ("Reddit", lambda: RedditScraper().get_jobs(limit_per_sub=50)),
         "himalayas": ("Himalayas", lambda: HimalayasScraper().get_jobs(limit=100)),
+        "arbeitnow": ("Arbeitnow", lambda: ArbeitnowScraper().get_jobs(limit=100)),
+        "jobicy": ("Jobicy", lambda: JobicyScraper().get_jobs(limit=50)),
+        "themuse": ("The Muse", lambda: TheMuseScraper().get_jobs(limit=100)),
     }
 
     if boards is None:
@@ -649,7 +786,7 @@ def scrape_board_jobs(
                     },
                 )
                 db_job = to_db_job(job, company_id)
-                if db.add_job(db_job):
+                if db.upsert_job(db_job):
                     board_stats["saved"] += 1
 
             print(f"  Saved {board_stats['saved']} new jobs")

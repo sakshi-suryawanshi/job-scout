@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install system deps for lxml/beautifulsoup
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libxml2-dev libxslt1-dev && \
+    apt-get install -y --no-install-recommends gcc libxml2-dev libxslt1-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -15,5 +15,7 @@ COPY . .
 EXPOSE 8501
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+
+ENV PYTHONPATH=/app
 
 ENTRYPOINT ["streamlit", "run", "app/main.py", "--server.port=8501", "--server.address=0.0.0.0"]
