@@ -57,10 +57,12 @@ with tab1:
             "Match Score",
             "Desperation Score",
             "Combined (Match + Desperation)",
+            "ASAP Hire (Best Chance First)",
         ], key="q_sort")
 
     # Fetch jobs
     try:
+        from datetime import datetime, timedelta
         queue_jobs = db.get_apply_queue(limit=queue_limit)
         # Filter by min score
         queue_jobs = [j for j in queue_jobs if (j.get("match_score", 0) or 0) >= min_score]
@@ -73,6 +75,26 @@ with tab1:
                 key=lambda j: (j.get("match_score", 0) or 0) + (j.get("desperation_score", 0) or 0),
                 reverse=True,
             )
+        elif sort_queue == "ASAP Hire (Best Chance First)":
+            # Composite: desperation*2 + match + recency bonus (jobs posted <7 days ago get +20)
+            now = datetime.now()
+            def _asap_score(j):
+                match = j.get("match_score", 0) or 0
+                desp = j.get("desperation_score", 0) or 0
+                # Recency: jobs discovered in last 7 days get bonus
+                disc = j.get("discovered_at") or j.get("discovered_date") or ""
+                recency_bonus = 0
+                try:
+                    disc_dt = datetime.fromisoformat(str(disc)[:19])
+                    if (now - disc_dt).days <= 7:
+                        recency_bonus = 20
+                except Exception:
+                    pass
+                # Small-board bonus: fewer competitors
+                low_comp = {"jobicy", "workingnomads", "arbeitnow", "hackernews", "hackernews_jobs"}
+                board_bonus = 10 if j.get("source_board") in low_comp else 0
+                return desp * 2 + match + recency_bonus + board_bonus
+            queue_jobs.sort(key=_asap_score, reverse=True)
         # else: already sorted by match_score from DB
     except Exception as e:
         st.error(f"Error loading queue: {e}")
@@ -97,11 +119,19 @@ with tab1:
 
             score_badge = f"Match: {score}" if score > 0 else ""
             desp_badge = f" | Desp: {desp}" if desp > 0 else ""
+            sal_min = job.get("salary_min")
+            sal_max = job.get("salary_max")
+            if sal_min and sal_max:
+                sal_badge = f" | ${sal_min//1000}k-${sal_max//1000}k"
+            elif sal_min:
+                sal_badge = f" | ${sal_min//1000}k+"
+            else:
+                sal_badge = ""
 
             checked = select_all and idx < 20
 
             with st.expander(
-                f"**{job.get('title', 'Untitled')}** — {company_name} | {score_badge}{desp_badge}",
+                f"**{job.get('title', 'Untitled')}** — {company_name} | {score_badge}{desp_badge}{sal_badge}",
                 expanded=False,
             ):
                 job_id = job.get("id", idx)

@@ -274,6 +274,8 @@ def matches_criteria(job: Dict, criteria: Dict) -> bool:
         "max_yoe": 5,
     }
     """
+    from worker.scraping.dedup import is_globally_remote
+
     title = (job.get("title") or "").lower()
     description = (job.get("description") or "").lower()
     location = (job.get("location") or "").lower()
@@ -281,6 +283,10 @@ def matches_criteria(job: Dict, criteria: Dict) -> bool:
 
     # Remote filter
     if criteria.get("remote_only") and not job.get("is_remote"):
+        return False
+
+    # Global remote filter (exclude US-only, India-based)
+    if criteria.get("global_remote_only") and not is_globally_remote(job):
         return False
 
     # Title must match at least one keyword
@@ -416,13 +422,20 @@ def get_all_slugs(db, ats_type: str) -> List[str]:
 
 def to_db_job(job: Dict, company_id: Optional[str] = None) -> Dict:
     """Convert a scraped job to the DB jobs table format."""
+    from worker.scraping.dedup import generate_job_fingerprint
+
+    title = job.get("title", "")[:500]
+    company_name = job.get("company_name", "")
+    fingerprint = generate_job_fingerprint(title, company_name) if company_name else None
+
     return {
         "company_id": company_id,
-        "title": job.get("title", "")[:500],
+        "title": title,
         "location": job.get("location", "")[:500],
         "is_remote": job.get("is_remote", False),
         "apply_url": job.get("apply_url", ""),
         "source_board": job.get("source_board", "unknown"),
+        "fingerprint": fingerprint,
         "match_score": 0,
         "is_new": True,
         "is_recommended": False,
@@ -497,7 +510,7 @@ def scrape_ats_jobs(
                         job["company_name"], defaults=company_defaults
                     )
                     db_job = to_db_job(job, company_id)
-                    if db.add_job(db_job):
+                    if db.upsert_job(db_job):
                         ats_stats["saved"] += 1
 
                 # Rate limiting between companies

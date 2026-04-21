@@ -60,6 +60,7 @@ with tab1:
         "regional_gems": "🌍 Regional Gems — Japan, Africa, SEA, Eastern Europe",
         "yc_latest": "🚀 Latest YC Batch — newest YC companies hiring remotely",
         "twitter_x": "🐦 Twitter/X — startups posting hiring on X (via Serper)",
+        "salary_targeted": "💵 Salary Targeted — explicitly $40k-$70k remote roles",
     }
 
     col1, col2 = st.columns(2)
@@ -68,14 +69,37 @@ with tab1:
     for i, (cat, desc) in enumerate(category_descriptions.items()):
         target_col = col1 if i % 2 == 0 else col2
         with target_col:
-            if st.checkbox(desc, value=cat in ("distress_signals", "hidden_gems", "funding_signals", "yc_latest", "job_boards"), key=f"cat_{cat}"):
+            if st.checkbox(desc, value=cat in ("distress_signals", "hidden_gems", "funding_signals", "yc_latest", "job_boards", "salary_targeted"), key=f"cat_{cat}"):
                 selected_categories.append(cat)
 
     # Budget controls
     st.divider()
     st.write("**Budget Controls** (free tier: 2,500 searches/month)")
 
-    bcol1, bcol2, bcol3 = st.columns(3)
+    # Show live quota + cooldown status
+    try:
+        from serper_dorking import get_serper_usage, is_category_on_cooldown
+        s_usage = get_serper_usage()
+        pct = s_usage["calls_this_month"] / s_usage["limit"]
+        if pct >= 0.9:
+            st.error(f"Serper quota: {s_usage['calls_this_month']}/{s_usage['limit']} this month — almost full!")
+        elif pct >= 0.6:
+            st.warning(f"Serper quota: {s_usage['calls_this_month']}/{s_usage['limit']} used — {s_usage['remaining']} left this month")
+        else:
+            st.caption(f"Serper quota: {s_usage['calls_this_month']}/{s_usage['limit']} used — {s_usage['remaining']} remaining this month")
+
+        # Show cooldown status for selected categories
+        cooled = []
+        for cat in selected_categories:
+            on_cd, days_ago = is_category_on_cooldown(cat)
+            if on_cd:
+                cooled.append(f"{cat} ({days_ago}d ago)")
+        if cooled:
+            st.info(f"These categories are on 7-day cooldown and will be skipped: {', '.join(cooled)}. Check 'Force re-run' to override.")
+    except Exception:
+        pass
+
+    bcol1, bcol2, bcol3, bcol4 = st.columns(4)
     with bcol1:
         max_queries = st.slider("Max queries per category", 1, 10, 2, help="Each query = 1 Serper credit")
     with bcol2:
@@ -84,6 +108,9 @@ with tab1:
         total_estimate = len(selected_categories) * max_queries
         st.metric("Estimated queries", total_estimate)
         st.caption("of 2,500/month free")
+    with bcol4:
+        force_rerun = st.checkbox("Force re-run (ignore cooldown)", value=False,
+                                  help="Override 7-day cooldown and re-query all selected categories")
 
     # Run discovery
     st.divider()
@@ -108,6 +135,7 @@ with tab1:
                     category,
                     max_queries=max_queries,
                     results_per_query=results_per_query,
+                    force=force_rerun,
                 )
 
                 # Convert to DB format

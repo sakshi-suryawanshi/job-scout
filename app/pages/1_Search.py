@@ -18,8 +18,20 @@ except Exception as e:
 # Import scrapers
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "worker", "scraping"))
 from ats_scrapers import scrape_ats_jobs
-from board_scrapers import scrape_board_jobs
+from board_scrapers import scrape_board_jobs, _get_enabled_boards
 from career_scraper import scrape_career_pages
+
+# Load board manager config to pre-check only enabled boards
+_ALL_BOARD_KEYS = [
+    "remoteok","remotive","remotive_devops","remotive_data","weworkremotely","wwr_devops",
+    "wwr_frontend","himalayas","arbeitnow","themuse","justjoin","hackernews","hackernews_jobs",
+    "reddit","reddit_remotejs","jobicy","jobicy_all","workingnomads","workingnomads_devops",
+    "jobspresso","wfhio","remoteco","authenticjobs","nodesk","4dayweek","dynamitejobs",
+    "freshremote","remotefirstjobs","devitjobs","djangojobs","larajobs","vuejobs","golangjobs",
+    "smashingmag","cryptojobslist","web3career","climatebase","powertofly",
+]
+_enabled_boards = set(_get_enabled_boards(_ALL_BOARD_KEYS))
+def _on(key): return key in _enabled_boards
 
 # Import AI scoring
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "worker", "ai"))
@@ -80,16 +92,56 @@ with tab1:
 
     with source_col2:
         st.write("**Job Boards** (direct job listings)")
-        board_remoteok = st.checkbox("RemoteOK (~100 jobs)", value=True, key="b_rok")
-        board_remotive = st.checkbox("Remotive (~200 jobs)", value=True, key="b_rmt")
-        board_wwr = st.checkbox("WeWorkRemotely (~100 jobs)", value=True, key="b_wwr")
-        board_hn = st.checkbox("HN Who's Hiring (~500 posts)", value=True, key="b_hn")
-        board_hn_jobs = st.checkbox("HN Job Stories (YC companies)", value=True, key="b_hnj")
-        board_reddit = st.checkbox("Reddit (r/forhire)", value=False, key="b_rdt")
-        board_himalayas = st.checkbox("Himalayas (~100 jobs)", value=True, key="b_him")
-        board_arbeitnow = st.checkbox("Arbeitnow (~100 jobs, EU+worldwide)", value=True, key="b_arb")
-        board_jobicy = st.checkbox("Jobicy (~50 jobs, small board)", value=True, key="b_jcy")
-        board_themuse = st.checkbox("The Muse (~100 jobs, startups)", value=True, key="b_muse")
+
+        st.caption("Defaults come from 🗂️ Board Manager. Override here for this run only.")
+
+        # ── Popular / High Volume ──
+        board_remoteok = st.checkbox("RemoteOK (~100 jobs)", value=_on("remoteok"), key="b_rok")
+        board_remotive = st.checkbox("Remotive software-dev (~200 jobs)", value=_on("remotive"), key="b_rmt")
+        board_remotive_devops = st.checkbox("Remotive DevOps category", value=_on("remotive_devops"), key="b_rmt_dv")
+        board_remotive_data = st.checkbox("Remotive Data category", value=_on("remotive_data"), key="b_rmt_dt")
+        board_wwr = st.checkbox("WeWorkRemotely backend (~100 jobs)", value=_on("weworkremotely"), key="b_wwr")
+        board_wwr_devops = st.checkbox("WeWorkRemotely DevOps", value=_on("wwr_devops"), key="b_wwr_dv")
+        board_wwr_frontend = st.checkbox("WeWorkRemotely Frontend", value=_on("wwr_frontend"), key="b_wwr_fe")
+        board_hn = st.checkbox("HN Who's Hiring (~500 posts)", value=_on("hackernews"), key="b_hn")
+        board_hn_jobs = st.checkbox("HN Job Stories (YC companies)", value=_on("hackernews_jobs"), key="b_hnj")
+        board_himalayas = st.checkbox("Himalayas (~100 jobs)", value=_on("himalayas"), key="b_him")
+        board_arbeitnow = st.checkbox("Arbeitnow (~100 jobs, EU+worldwide)", value=_on("arbeitnow"), key="b_arb")
+        board_themuse = st.checkbox("The Muse (~100 jobs, startups)", value=_on("themuse"), key="b_muse")
+        board_justjoin = st.checkbox("JustJoin.it (EU tech, many remote)", value=_on("justjoin"), key="b_jj")
+
+        st.caption("── Low competition (fewer applicants = better odds) ──")
+        board_jobicy = st.checkbox("Jobicy (~50 jobs, small board)", value=_on("jobicy"), key="b_jcy")
+        board_jobicy_all = st.checkbox("Jobicy all engineering (no filter)", value=_on("jobicy_all"), key="b_jcy_all")
+        board_workingnomads = st.checkbox("WorkingNomads dev (~100 jobs)", value=_on("workingnomads"), key="b_wn")
+        board_workingnomads_devops = st.checkbox("WorkingNomads DevOps", value=_on("workingnomads_devops"), key="b_wn_dv")
+        board_jobspresso = st.checkbox("Jobspresso (curated, ~50 jobs)", value=_on("jobspresso"), key="b_jsp")
+        board_wfhio = st.checkbox("WFH.io (niche remote, ~60 jobs)", value=_on("wfhio"), key="b_wfh")
+        board_remoteco = st.checkbox("Remote.co (curated remote)", value=_on("remoteco"), key="b_rco")
+        board_authenticjobs = st.checkbox("Authentic Jobs (web/dev/design)", value=_on("authenticjobs"), key="b_auth")
+        board_nodesk = st.checkbox("NodeDesk (very small, curated)", value=_on("nodesk"), key="b_ndk")
+        board_4dayweek = st.checkbox("4DayWeek (ultra-niche, tiny pool)", value=_on("4dayweek"), key="b_4dw")
+        board_dynamitejobs = st.checkbox("Dynamite Jobs (remote entrepreneurs)", value=_on("dynamitejobs"), key="b_dyn")
+        board_freshremote = st.checkbox("Fresh Remote (aggregator)", value=_on("freshremote"), key="b_fr")
+        board_remotefirstjobs = st.checkbox("Remote First Jobs (remote-only companies)", value=_on("remotefirstjobs"), key="b_rfj")
+        board_devitjobs = st.checkbox("DevITjobs EU (EU developer jobs API)", value=_on("devitjobs"), key="b_dit")
+
+        st.caption("── Tech-specific (niche = less competition) ──")
+        board_djangojobs = st.checkbox("DjangoJobs (Python/Django only)", value=_on("djangojobs"), key="b_dj")
+        board_larajobs = st.checkbox("LaraJobs (PHP/Laravel)", value=_on("larajobs"), key="b_lara")
+        board_vuejobs = st.checkbox("VueJobs (Vue.js)", value=_on("vuejobs"), key="b_vue")
+        board_golangjobs = st.checkbox("GolangJobs (Go)", value=_on("golangjobs"), key="b_go")
+        board_smashingmag = st.checkbox("Smashing Magazine Jobs (frontend/dev)", value=_on("smashingmag"), key="b_smsh")
+
+        st.caption("── Startup / Niche / Web3 ──")
+        board_cryptojobslist = st.checkbox("CryptoJobsList (web3 startups, remote-first)", value=_on("cryptojobslist"), key="b_crypto")
+        board_web3career = st.checkbox("Web3.career (blockchain startups)", value=_on("web3career"), key="b_w3c")
+        board_climatebase = st.checkbox("ClimateBase (climate tech startups)", value=_on("climatebase"), key="b_clm")
+        board_powertofly = st.checkbox("PowerToFly (inclusive remote hiring)", value=_on("powertofly"), key="b_ptf")
+
+        st.caption("── Communities ──")
+        board_reddit = st.checkbox("Reddit r/forhire", value=_on("reddit"), key="b_rdt")
+        board_reddit_remotejs = st.checkbox("Reddit r/remotejs", value=_on("reddit_remotejs"), key="b_rjs")
 
     st.write("**Career Pages** (scrape company websites directly)")
     scrape_careers = st.checkbox("Scrape career pages of DB companies (custom/unknown ATS)", value=False, key="cp_on")
@@ -106,27 +158,47 @@ with tab1:
     if ats_ashby:
         ats_types.append("ashby")
 
-    boards = []
-    if board_remoteok:
-        boards.append("remoteok")
-    if board_remotive:
-        boards.append("remotive")
-    if board_wwr:
-        boards.append("weworkremotely")
-    if board_hn:
-        boards.append("hackernews")
-    if board_hn_jobs:
-        boards.append("hackernews_jobs")
-    if board_reddit:
-        boards.append("reddit")
-    if board_himalayas:
-        boards.append("himalayas")
-    if board_arbeitnow:
-        boards.append("arbeitnow")
-    if board_jobicy:
-        boards.append("jobicy")
-    if board_themuse:
-        boards.append("themuse")
+    _board_map = [
+        (board_remoteok, "remoteok"),
+        (board_remotive, "remotive"),
+        (board_remotive_devops, "remotive_devops"),
+        (board_remotive_data, "remotive_data"),
+        (board_wwr, "weworkremotely"),
+        (board_wwr_devops, "wwr_devops"),
+        (board_wwr_frontend, "wwr_frontend"),
+        (board_hn, "hackernews"),
+        (board_hn_jobs, "hackernews_jobs"),
+        (board_reddit, "reddit"),
+        (board_reddit_remotejs, "reddit_remotejs"),
+        (board_himalayas, "himalayas"),
+        (board_arbeitnow, "arbeitnow"),
+        (board_jobicy, "jobicy"),
+        (board_jobicy_all, "jobicy_all"),
+        (board_themuse, "themuse"),
+        (board_workingnomads, "workingnomads"),
+        (board_workingnomads_devops, "workingnomads_devops"),
+        (board_jobspresso, "jobspresso"),
+        (board_wfhio, "wfhio"),
+        (board_remoteco, "remoteco"),
+        (board_authenticjobs, "authenticjobs"),
+        (board_nodesk, "nodesk"),
+        (board_4dayweek, "4dayweek"),
+        (board_dynamitejobs, "dynamitejobs"),
+        (board_freshremote, "freshremote"),
+        (board_remotefirstjobs, "remotefirstjobs"),
+        (board_devitjobs, "devitjobs"),
+        (board_djangojobs, "djangojobs"),
+        (board_larajobs, "larajobs"),
+        (board_vuejobs, "vuejobs"),
+        (board_golangjobs, "golangjobs"),
+        (board_smashingmag, "smashingmag"),
+        (board_cryptojobslist, "cryptojobslist"),
+        (board_web3career, "web3career"),
+        (board_climatebase, "climatebase"),
+        (board_powertofly, "powertofly"),
+        (board_justjoin, "justjoin"),
+    ]
+    boards = [key for flag, key in _board_map if flag]
 
     total_sources = len(ats_types) + len(boards) + (1 if scrape_careers else 0)
     phases = sum([bool(ats_types), bool(boards), scrape_careers])
@@ -256,9 +328,26 @@ with tab2:
     with fcol1:
         filter_new = st.selectbox("Status", ["All", "New Only", "Saved", "Applied", "Rejected"])
     with fcol2:
-        all_sources = ["All", "greenhouse", "lever", "ashby", "remoteok", "remotive",
-                       "weworkremotely", "hackernews", "hackernews_jobs", "reddit_forhire",
-                       "himalayas", "arbeitnow", "jobicy", "themuse", "career_page"]
+        all_sources = [
+            "All",
+            # ATS
+            "greenhouse", "lever", "ashby",
+            # Large boards
+            "remoteok", "remotive", "weworkremotely", "hackernews", "hackernews_jobs",
+            "himalayas", "arbeitnow", "themuse", "justjoin",
+            # Low-competition
+            "jobicy", "workingnomads", "jobspresso", "wfhio", "remoteco",
+            "authenticjobs", "nodesk", "4dayweek", "dynamitejobs", "freshremote",
+            "remotefirstjobs", "devitjobs",
+            # Tech-specific
+            "djangojobs", "larajobs", "vuejobs", "golangjobs", "smashingmag",
+            # Startup/niche
+            "cryptojobslist", "web3career", "climatebase", "powertofly",
+            # Communities
+            "reddit_forhire", "reddit_remotejs",
+            # Career pages
+            "career_page",
+        ]
         filter_source = st.selectbox("Source", all_sources)
     with fcol3:
         filter_remote = st.selectbox("Location", ["All", "Remote Only"])
@@ -433,6 +522,21 @@ with tab3:
     except Exception:
         pass
     has_gemini = gemini_key and gemini_key != "your_gemini_api_key_here"
+
+    # Show Gemini usage
+    if has_gemini:
+        try:
+            from gemini_client import get_gemini_usage_today
+            g_usage = get_gemini_usage_today()
+            pct = g_usage["calls"] / g_usage["limit"]
+            if pct >= 0.9:
+                st.error(f"Gemini quota: {g_usage['calls']}/{g_usage['limit']} today — almost full! Rule-based scoring will be used.")
+            elif pct >= 0.7:
+                st.warning(f"Gemini quota: {g_usage['calls']}/{g_usage['limit']} today ({g_usage['remaining']} left)")
+            else:
+                st.caption(f"Gemini quota today: {g_usage['calls']}/{g_usage['limit']} used — {g_usage['remaining']} remaining")
+        except Exception:
+            pass
 
     scol_a, scol_b = st.columns(2)
     with scol_a:

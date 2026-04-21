@@ -12,6 +12,7 @@ Free tier: 1,500 requests/day via Google AI Studio.
 import os
 import json
 import httpx
+from datetime import date
 from typing import List, Dict, Optional
 
 try:
@@ -19,6 +20,41 @@ try:
     load_dotenv()
 except:
     pass
+
+# ---------------------------------------------------------------------------
+# Usage tracking — persisted in .streamlit/usage.json (volume-mounted)
+# ---------------------------------------------------------------------------
+
+_USAGE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), ".streamlit", "usage.json")
+
+
+def _load_usage() -> dict:
+    try:
+        with open(_USAGE_FILE) as f:
+            data = json.load(f)
+        if data.get("date") != date.today().isoformat():
+            return {"date": date.today().isoformat(), "gemini_calls": 0}
+        return data
+    except Exception:
+        return {"date": date.today().isoformat(), "gemini_calls": 0}
+
+
+def _save_usage(data: dict):
+    try:
+        os.makedirs(os.path.dirname(_USAGE_FILE), exist_ok=True)
+        with open(_USAGE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def get_gemini_usage_today() -> dict:
+    """Return {calls: int, remaining: int, limit: int} for today."""
+    data = _load_usage()
+    calls = data.get("gemini_calls", 0)
+    limit = 1500
+    return {"calls": calls, "remaining": limit - calls, "limit": limit}
 
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
@@ -51,6 +87,9 @@ class GeminiClient:
             )
             response.raise_for_status()
             self.requests_made += 1
+            usage = _load_usage()
+            usage["gemini_calls"] = usage.get("gemini_calls", 0) + 1
+            _save_usage(usage)
 
             data = response.json()
             candidates = data.get("candidates", [])
@@ -227,12 +266,11 @@ def score_jobs_batch(
 ) -> List[Dict]:
     """
     Score multiple jobs. Returns list of jobs with score/reason added.
-    Budget-conscious: batches 5 jobs per API call.
+    Budget-conscious: batches 10 jobs per API call.
     """
     scored = []
 
-    # Batch scoring — 5 jobs per prompt to save API calls
-    batch_size = 5
+    batch_size = 10
     for i in range(0, len(jobs), batch_size):
         batch = jobs[i:i + batch_size]
 
@@ -348,6 +386,25 @@ def _rule_based_score(job: Dict, criteria: Dict) -> int:
     else:
         score += 20
 
+    # Small-board competition bonus (+5) — fewer applicants = higher chance
+    # Small boards: jobicy (~50 jobs), workingnomads, arbeitnow vs remoteok (10k+)
+    low_competition_boards = {
+        "jobicy", "workingnomads", "arbeitnow", "hackernews", "hackernews_jobs",
+        "jobspresso", "wfhio", "remoteco", "authenticjobs", "djangojobs", "larajobs",
+        "nodesk", "4dayweek", "vuejobs", "golangjobs", "dynamitejobs", "smashingmag",
+        "devitjobs", "cryptojobslist", "web3career", "climatebase", "freshremote",
+        "powertofly", "remotefirstjobs", "jobicy_all",
+    }
+    if job.get("source_board") in low_competition_boards:
+        score += 5
+
+    # Salary bonus — if salary data confirms target range ($40k-$100k)
+    salary_min = job.get("salary_min")
+    salary_max = job.get("salary_max")
+    if salary_min and salary_max:
+        if 40000 <= salary_min <= 100000 or 40000 <= salary_max <= 100000:
+            score += 5
+
     return min(100, score)
 
 
@@ -417,15 +474,30 @@ def score_all_jobs(
     total_score = 0
 
     if ai_available and gemini:
-        # AI scoring in batches
-        batch_size = 5
-        for i in range(0, len(unscored), batch_size):
-            batch = unscored[i:i + batch_size]
+        # Pre-filter: run rule-based first, only send promising jobs to Gemini
+        # Saves ~60% of API calls by skipping obvious mismatches
+        ai_candidates = []
+        for j in unscored:
+            rule_result = score_job_rule_based(j, criteria)
+            if rule_result["score"] >= 15:
+                ai_candidates.append(j)
+            else:
+                # Too weak — save rule score directly, don't burn Gemini quota
+                _update_job_score(db, j["id"], rule_result["score"], rule_result["match_reason"] + " (pre-filtered)")
+                scored_count += 1
+                total_score += rule_result["score"]
+
+        if progress_callback and ai_candidates:
+            progress_callback(f"Pre-filter: {len(unscored) - len(ai_candidates)} skipped, {len(ai_candidates)} sent to Gemini", 0.1)
+
+        # AI scoring in batches of 10
+        batch_size = 10
+        for i in range(0, len(ai_candidates), batch_size):
+            batch = ai_candidates[i:i + batch_size]
 
             if progress_callback:
-                progress_callback(f"AI scoring {i+1}-{min(i+batch_size, len(unscored))}...", i / len(unscored))
+                progress_callback(f"AI scoring {i+1}-{min(i+batch_size, len(ai_candidates))} of {len(ai_candidates)}...", 0.1 + 0.85 * (i / max(len(ai_candidates), 1)))
 
-            # Prepare job data for scoring
             job_dicts = []
             for j in batch:
                 company_info = j.get("companies", {}) or {}
@@ -435,7 +507,7 @@ def score_all_jobs(
                     "location": j.get("location", ""),
                     "is_remote": j.get("is_remote", False),
                     "source_board": j.get("source_board", ""),
-                    "description": "",  # We don't store descriptions in DB
+                    "description": "",
                 })
 
             batch_scores = _score_batch(gemini, job_dicts, criteria)
@@ -448,7 +520,6 @@ def score_all_jobs(
                     scored_count += 1
                     total_score += score
             else:
-                # Fallback for this batch
                 for j in batch:
                     result = score_job_rule_based(j, criteria)
                     _update_job_score(db, j["id"], result["score"], result["match_reason"])

@@ -286,7 +286,7 @@ def scrape_career_pages(
     scraper = CareerPageScraper()
     stats = {"total_scraped": 0, "matched": 0, "saved": 0, "errors": 0}
 
-    from board_scrapers import matches_criteria, to_db_job
+    from worker.scraping.board_scrapers import matches_criteria, to_db_job
 
     for i, company in enumerate(targets):
         name = company.get("name", "Unknown")
@@ -305,7 +305,7 @@ def scrape_career_pages(
             for job in matching:
                 company_id = company.get("id")
                 db_job = to_db_job(job, company_id)
-                if db.add_job(db_job):
+                if db.upsert_job(db_job):
                     stats["saved"] += 1
 
             # Update last_scraped

@@ -6,8 +6,10 @@ Free tier: 2,500 searches/month.
 """
 
 import os
+import json
 import httpx
 import re
+from datetime import date, datetime
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
 
@@ -19,6 +21,73 @@ except:
 
 
 SERPER_API_URL = "https://google.serper.dev/search"
+
+# ---------------------------------------------------------------------------
+# Serper usage + cooldown tracking
+# ---------------------------------------------------------------------------
+
+_SERPER_USAGE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), ".streamlit", "serper_usage.json")
+
+_COOLDOWN_DAYS = 7  # Don't re-run same category within 7 days
+
+
+def _load_serper_usage() -> dict:
+    try:
+        with open(_SERPER_USAGE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"monthly": {}, "category_last_run": {}}
+
+
+def _save_serper_usage(data: dict):
+    try:
+        os.makedirs(os.path.dirname(_SERPER_USAGE_FILE), exist_ok=True)
+        with open(_SERPER_USAGE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def get_serper_usage() -> dict:
+    """Return monthly query counts and category cooldown status."""
+    data = _load_serper_usage()
+    month_key = date.today().strftime("%Y-%m")
+    monthly_calls = data.get("monthly", {}).get(month_key, 0)
+    remaining = max(0, 2500 - monthly_calls)
+
+    cooldowns = {}
+    for cat, last_run in data.get("category_last_run", {}).items():
+        try:
+            days_ago = (date.today() - date.fromisoformat(last_run)).days
+            cooldowns[cat] = {"last_run": last_run, "days_ago": days_ago, "on_cooldown": days_ago < _COOLDOWN_DAYS}
+        except Exception:
+            pass
+
+    return {"calls_this_month": monthly_calls, "remaining": remaining, "limit": 2500, "cooldowns": cooldowns}
+
+
+def _record_serper_calls(count: int, category: str):
+    data = _load_serper_usage()
+    month_key = date.today().strftime("%Y-%m")
+    monthly = data.get("monthly", {})
+    monthly[month_key] = monthly.get(month_key, 0) + count
+    data["monthly"] = monthly
+    data.setdefault("category_last_run", {})[category] = date.today().isoformat()
+    _save_serper_usage(data)
+
+
+def is_category_on_cooldown(category: str) -> tuple:
+    """Returns (on_cooldown: bool, days_ago: int)."""
+    data = _load_serper_usage()
+    last_run = data.get("category_last_run", {}).get(category)
+    if not last_run:
+        return False, None
+    try:
+        days_ago = (date.today() - date.fromisoformat(last_run)).days
+        return days_ago < _COOLDOWN_DAYS, days_ago
+    except Exception:
+        return False, None
 
 # --- Dork query templates ---
 # Each returns a list of (query_string, category) tuples.
@@ -104,6 +173,13 @@ def _build_dork_queries() -> dict:
             ('site:x.com "job opening" "remote" "engineer" "startup" "DM"', "twitter"),
             ('site:twitter.com "hiring" "remote" "backend" "startup" "apply now"', "twitter"),
             ('site:x.com "looking for" "engineer" "remote" "seed" OR "series a"', "twitter"),
+        ],
+        "salary_targeted": [
+            ('site:wellfound.com "$50k" OR "$60k" "backend" "remote"', "wellfound"),
+            ('site:wellfound.com "$40k" OR "$70k" "engineer" "remote" "startup"', "wellfound"),
+            ('"$50,000" OR "$60,000" "backend developer" "remote" -glassdoor -indeed', "salary"),
+            ('"annual salary" "50" OR "60" "remote" "backend" OR "fullstack" "startup"', "salary"),
+            ('site:jobs.lever.co "compensation" "remote" "engineer" "startup"', "lever"),
         ],
     }
 
@@ -329,10 +405,15 @@ class SerperDorker:
         }
 
     def run_dork_category(
-        self, category: str, max_queries: int = None, results_per_query: int = 10
+        self, category: str, max_queries: int = None, results_per_query: int = 10,
+        force: bool = False,
     ) -> List[Dict]:
-        """Run all dork queries for a category."""
-        # Rebuild queries each call so year tokens stay current
+        """Run all dork queries for a category. Skips if on cooldown unless force=True."""
+        on_cooldown, days_ago = is_category_on_cooldown(category)
+        if on_cooldown and not force:
+            print(f"  [{category}] on cooldown (ran {days_ago}d ago) — skipping to save quota")
+            return []
+
         live_queries = _build_dork_queries()
         queries = live_queries.get(category, [])
         if not queries:
@@ -343,12 +424,17 @@ class SerperDorker:
             queries = queries[:max_queries]
 
         all_companies = []
+        queries_fired = 0
         for query_str, cat in queries:
             print(f"  Dorking: {query_str[:60]}...")
             results = self.search(query_str, num_results=results_per_query)
             companies = self.parse_results(results, cat)
             all_companies.extend(companies)
+            queries_fired += 1
             print(f"    Found {len(companies)} companies")
+
+        if queries_fired:
+            _record_serper_calls(queries_fired, category)
 
         return all_companies
 

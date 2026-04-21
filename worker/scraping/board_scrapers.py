@@ -8,9 +8,33 @@ import httpx
 import re
 import html
 import time
+import json
+import os
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Optional
 from datetime import datetime, date
+
+# ---------------------------------------------------------------------------
+# Board Manager config reader
+# ---------------------------------------------------------------------------
+
+_BOARDS_CONFIG_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    ".streamlit", "boards_config.json",
+)
+
+
+def _get_enabled_boards(all_keys: list) -> list:
+    """Return board keys filtered by boards_config.json. Falls back to all keys."""
+    try:
+        with open(_BOARDS_CONFIG_FILE) as f:
+            cfg = json.load(f)
+        enabled = cfg.get("enabled_boards")
+        if enabled:
+            return [k for k in enabled if k in all_keys]
+    except Exception:
+        pass
+    return all_keys
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +72,16 @@ def to_db_job(job: Dict, company_id: Optional[str] = None) -> Dict:
     company_name = job.get("company_name", "")
     fingerprint = generate_job_fingerprint(title, company_name) if company_name else None
 
+    # Normalize salary: some boards return salary_min/max, others return salary (text)
+    salary_min = job.get("salary_min")
+    salary_max = job.get("salary_max")
+    # Jobicy returns annualSalaryMin as "salary" field — promote it
+    if salary_min is None and job.get("salary"):
+        try:
+            salary_min = int(job["salary"])
+        except (ValueError, TypeError):
+            pass
+
     return {
         "company_id": company_id,
         "title": title,
@@ -56,6 +90,8 @@ def to_db_job(job: Dict, company_id: Optional[str] = None) -> Dict:
         "apply_url": job.get("apply_url", ""),
         "source_board": job.get("source_board", "unknown"),
         "fingerprint": fingerprint,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
         "match_score": 0,
         "is_new": True,
         "is_recommended": False,
@@ -607,6 +643,608 @@ class TheMuseScraper:
             return []
 
 
+# ---------------------------------------------------------------------------
+# WorkingNomads — free REST API, small board = less competition
+# ---------------------------------------------------------------------------
+
+class WorkingNomadsScraper:
+    """https://www.workingnomads.com/api/exposed_jobs/ — free, remote-only."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            response = client.get(
+                "https://www.workingnomads.com/api/exposed_jobs/",
+                params={"category": "development"},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            jobs = []
+            for item in data[:limit]:
+                jobs.append({
+                    "title": item.get("title", ""),
+                    "company_name": item.get("company_name", "Unknown"),
+                    "location": item.get("region", "Worldwide"),
+                    "is_remote": True,
+                    "apply_url": item.get("url", ""),
+                    "description": _clean_html(item.get("description", ""))[:5000],
+                    "source_board": "workingnomads",
+                    "posted_at": item.get("pub_date"),
+                })
+            return jobs
+        except Exception as e:
+            print(f"WorkingNomads error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# Jobspresso — curated remote jobs RSS, small board, very low competition
+# ---------------------------------------------------------------------------
+
+class JobspressoScraper:
+    """https://jobspresso.co — curated remote dev jobs, WordPress RSS feed."""
+
+    def get_jobs(self, limit: int = 50) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            response = client.get("https://jobspresso.co/feed/?post_type=job_listing")
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+
+            jobs = []
+            for item in root.findall(".//item")[:limit]:
+                title_el = item.find("title")
+                link_el = item.find("link")
+                desc_el = item.find("description")
+                date_el = item.find("pubDate")
+
+                if title_el is None or link_el is None:
+                    continue
+
+                raw_title = title_el.text or ""
+                url = link_el.text.strip() if link_el.text else ""
+                description = _clean_html(desc_el.text if desc_el is not None else "")
+
+                # Title format is usually "Job Title at Company"
+                company_name = "Unknown"
+                job_title = raw_title
+                if " at " in raw_title:
+                    parts = raw_title.rsplit(" at ", 1)
+                    job_title = parts[0].strip()
+                    company_name = parts[1].strip()
+
+                jobs.append({
+                    "title": job_title[:200],
+                    "company_name": company_name[:200],
+                    "location": "Remote",
+                    "is_remote": True,
+                    "apply_url": url,
+                    "description": description[:5000],
+                    "source_board": "jobspresso",
+                    "posted_at": date_el.text if date_el is not None else None,
+                })
+            return jobs
+        except Exception as e:
+            print(f"Jobspresso error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# WFH.io — free JSON API, niche remote board, minimal competition
+# ---------------------------------------------------------------------------
+
+class WFHioScraper:
+    """https://wfh.io/api/v2/jobs.json — free, no auth, niche remote board."""
+
+    def get_jobs(self, limit: int = 60) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            jobs = []
+            page = 1
+
+            while len(jobs) < limit:
+                response = client.get(
+                    "https://wfh.io/api/v2/jobs.json",
+                    params={"page": page},
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                items = data if isinstance(data, list) else data.get("jobs", [])
+                if not items:
+                    break
+
+                for item in items:
+                    company = item.get("company", {}) or {}
+                    jobs.append({
+                        "title": item.get("title", ""),
+                        "company_name": company.get("name", "Unknown") if isinstance(company, dict) else str(company),
+                        "location": "Remote",
+                        "is_remote": True,
+                        "apply_url": item.get("url", "") or item.get("apply_url", ""),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "wfhio",
+                        "posted_at": item.get("created_at"),
+                    })
+
+                if len(items) < 30:  # Last page
+                    break
+                page += 1
+
+            return jobs[:limit]
+        except Exception as e:
+            print(f"WFH.io error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# Generic RSS/Atom Job Feed Parser
+# ---------------------------------------------------------------------------
+
+def _parse_rss_feed(feed_url: str, source_board: str, limit: int = 80) -> List[Dict]:
+    """
+    Parse any standard RSS 2.0 or Atom feed for job listings.
+    Handles both RSS <item> and Atom <entry> formats.
+    """
+    NS_ATOM = "http://www.w3.org/2005/Atom"
+    try:
+        client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+        response = client.get(feed_url)
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+
+        # Support RSS <item> and Atom <entry>
+        items = root.findall(".//item")
+        if not items:
+            items = root.findall(f".//{{{NS_ATOM}}}entry")
+
+        jobs = []
+        for item in items[:limit]:
+            def _t(tag):
+                el = item.find(tag) or item.find(f"{{{NS_ATOM}}}{tag}")
+                return (el.text or "").strip() if el is not None else ""
+
+            raw_title = _t("title")
+            url = _t("link")
+            # Atom <link href="...">
+            if not url:
+                link_el = item.find(f"{{{NS_ATOM}}}link")
+                if link_el is not None:
+                    url = link_el.get("href", "")
+            desc = _clean_html(_t("description") or _t("summary") or _t("content"))
+
+            # Parse "Job Title at Company" or "Job Title - Company"
+            company = "Unknown"
+            job_title = raw_title
+            for sep in (" at ", " @ ", " | ", " — ", " – "):
+                if sep in raw_title:
+                    parts = raw_title.rsplit(sep, 1)
+                    if len(parts) == 2 and parts[1].strip():
+                        job_title = parts[0].strip()
+                        company = parts[1].strip()
+                        break
+
+            jobs.append({
+                "title": job_title[:200],
+                "company_name": company[:200],
+                "location": "Remote" if _is_remote("", raw_title, desc) else "Unknown",
+                "is_remote": _is_remote("", raw_title, desc),
+                "apply_url": url,
+                "description": desc[:5000],
+                "source_board": source_board,
+                "posted_at": _t("pubDate") or _t("published") or _t("updated") or None,
+            })
+        return jobs
+    except Exception as e:
+        print(f"{source_board} RSS error ({feed_url}): {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Remote.co — curated remote-only board, RSS, smaller than RemoteOK
+# ---------------------------------------------------------------------------
+class RemoteCo:
+    def get_jobs(self): return _parse_rss_feed("https://remote.co/remote-jobs/feed/", "remoteco")
+
+
+# ---------------------------------------------------------------------------
+# Authentic Jobs — web/dev/design jobs RSS (10+ years, indie/agency focused)
+# ---------------------------------------------------------------------------
+class AuthenticJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://authenticjobs.com/feed/", "authenticjobs")
+
+
+# ---------------------------------------------------------------------------
+# DjangoJobs.net — Python/Django specific, very niche, near-zero competition
+# ---------------------------------------------------------------------------
+class DjangoJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://djangojobs.net/jobs/feed/rss/", "djangojobs")
+
+
+# ---------------------------------------------------------------------------
+# LaraJobs.com — PHP/Laravel ecosystem, small companies, global remote
+# ---------------------------------------------------------------------------
+class LaraJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://larajobs.com/feed", "larajobs")
+
+
+# ---------------------------------------------------------------------------
+# NodeDesk — curated remote jobs (very small board, very low applicants)
+# ---------------------------------------------------------------------------
+class NodeDeskScraper:
+    def get_jobs(self): return _parse_rss_feed("https://nodesk.co/remote-work/rss.xml", "nodesk")
+
+
+# ---------------------------------------------------------------------------
+# 4DayWeek.io — 4-day work week remote jobs, ultra-niche, tiny applicant pool
+# ---------------------------------------------------------------------------
+class FourDayWeekScraper:
+    def get_jobs(self):
+        # Try JSON API first, fall back to RSS
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            resp = client.get("https://4dayweek.io/api/jobs", params={"format": "json"})
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("jobs", [])):
+                    jobs.append({
+                        "title": item.get("title", item.get("role", "")),
+                        "company_name": item.get("company", {}).get("name", "Unknown") if isinstance(item.get("company"), dict) else str(item.get("company", "Unknown")),
+                        "location": item.get("location", "Remote"),
+                        "is_remote": True,
+                        "apply_url": item.get("url", item.get("apply_url", "")),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "4dayweek",
+                        "posted_at": item.get("published_at") or item.get("created_at"),
+                    })
+                return jobs
+        except Exception:
+            pass
+        return _parse_rss_feed("https://4dayweek.io/remote-jobs.rss", "4dayweek")
+
+
+# ---------------------------------------------------------------------------
+# VueJobs.com — Vue.js developer jobs RSS
+# ---------------------------------------------------------------------------
+class VueJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://vuejobs.com/feed.atom", "vuejobs")
+
+
+# ---------------------------------------------------------------------------
+# GolangJobs.xyz — Go/Golang specific, niche, small applicant pool
+# ---------------------------------------------------------------------------
+class GolangJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://golangjobs.xyz/feed/", "golangjobs")
+
+
+# ---------------------------------------------------------------------------
+# Dynamite Jobs — location-independent remote jobs, entrepreneur-focused
+# ---------------------------------------------------------------------------
+class DynamiteJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://dynamitejobs.com/remote-jobs.rss", "dynamitejobs")
+
+
+# ---------------------------------------------------------------------------
+# Smashing Magazine Jobs — front-end/dev focused, small but high quality
+# ---------------------------------------------------------------------------
+class SmashingMagJobsScraper:
+    def get_jobs(self): return _parse_rss_feed("https://jobs.smashingmagazine.com/jobs/rss", "smashingmag")
+
+
+# ---------------------------------------------------------------------------
+# DevITjobs.eu — free JSON API, EU developer jobs (many globally remote)
+# ---------------------------------------------------------------------------
+class DevITJobsScraper:
+    """https://devitjobs.eu/api/JobOffers/short — no auth needed, EU tech jobs."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            response = client.get("https://devitjobs.eu/api/JobOffers/short")
+            response.raise_for_status()
+            data = response.json()
+
+            jobs = []
+            for item in (data if isinstance(data, list) else data.get("data", []))[:limit]:
+                salary_min = item.get("salaryFrom") or item.get("salary_min")
+                salary_max = item.get("salaryTo") or item.get("salary_max")
+                location = item.get("location") or item.get("city") or "EU Remote"
+                is_remote = item.get("remote", False) or _is_remote(str(location), item.get("title", ""))
+                jobs.append({
+                    "title": item.get("title", item.get("position", "")),
+                    "company_name": item.get("company", item.get("companyName", "Unknown")),
+                    "location": str(location),
+                    "is_remote": is_remote,
+                    "apply_url": item.get("url", item.get("applyUrl", "")),
+                    "description": _clean_html(item.get("description", ""))[:5000],
+                    "source_board": "devitjobs",
+                    "salary_min": int(salary_min) if salary_min else None,
+                    "salary_max": int(salary_max) if salary_max else None,
+                    "posted_at": item.get("publishedAt") or item.get("created_at"),
+                })
+            return jobs
+        except Exception as e:
+            print(f"DevITjobs error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# CryptoJobsList — web3/blockchain startups, remote-first, small teams
+# ---------------------------------------------------------------------------
+class CryptoJobsListScraper:
+    """https://cryptojobslist.com — blockchain startups, often small + remote + desperate."""
+
+    def get_jobs(self, limit: int = 60) -> List[Dict]:
+        # Try JSON API first
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0", "Accept": "application/json"})
+            resp = client.get("https://cryptojobslist.com/api/jobs")
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("jobs", []))[:limit]:
+                    jobs.append({
+                        "title": item.get("title", item.get("role", "")),
+                        "company_name": item.get("company", "Unknown"),
+                        "location": item.get("location", "Remote"),
+                        "is_remote": True,
+                        "apply_url": item.get("url", item.get("apply_url", "")),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "cryptojobslist",
+                        "posted_at": item.get("created_at"),
+                    })
+                return jobs
+        except Exception:
+            pass
+        return _parse_rss_feed("https://cryptojobslist.com/remote.rss", "cryptojobslist", limit)
+
+
+# ---------------------------------------------------------------------------
+# Web3.career — blockchain/crypto companies hiring engineers
+# ---------------------------------------------------------------------------
+class Web3CareerScraper:
+    def get_jobs(self): return _parse_rss_feed("https://web3.career/remote-jobs-rss", "web3career")
+
+
+# ---------------------------------------------------------------------------
+# ClimateBase — climate tech startups, mission-driven, often remote + urgent
+# ---------------------------------------------------------------------------
+class ClimateBaseScraper:
+    """https://climatebase.org — climate tech startups, remote, desperate to hire devs."""
+
+    def get_jobs(self, limit: int = 60) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0", "Accept": "application/json"})
+            resp = client.get(
+                "https://climatebase.org/api/jobs",
+                params={"remote": "true", "limit": limit},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("results", data.get("jobs", [])))[:limit]:
+                    org = item.get("organization", {}) or {}
+                    jobs.append({
+                        "title": item.get("title", item.get("role", "")),
+                        "company_name": org.get("name", item.get("company", "Unknown")),
+                        "location": item.get("location", "Remote"),
+                        "is_remote": item.get("remote", True),
+                        "apply_url": item.get("url", item.get("apply_url", "")),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "climatebase",
+                        "posted_at": item.get("created_at") or item.get("published_at"),
+                    })
+                return jobs
+        except Exception:
+            pass
+        return _parse_rss_feed("https://climatebase.org/jobs.rss", "climatebase", limit)
+
+
+# ---------------------------------------------------------------------------
+# JustJoin.it — Polish/EU tech jobs, many fully remote, large & active
+# ---------------------------------------------------------------------------
+class JustJoinScraper:
+    """https://justjoin.it — biggest EU tech job board, many remote-friendly."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            resp = client.get("https://justjoin.it/api/offers", params={"remote": "true"})
+            resp.raise_for_status()
+            data = resp.json()
+
+            jobs = []
+            for item in (data if isinstance(data, list) else [])[:limit]:
+                salary = item.get("employmentTypes", [{}])[0] if item.get("employmentTypes") else {}
+                sal_from = salary.get("fromPln") or salary.get("from")
+                sal_to = salary.get("toPln") or salary.get("to")
+                # Convert PLN to USD approximately (1 PLN ≈ 0.25 USD)
+                salary_min = int(sal_from * 0.25) if sal_from else None
+                salary_max = int(sal_to * 0.25) if sal_to else None
+
+                jobs.append({
+                    "title": item.get("title", ""),
+                    "company_name": item.get("companyName", "Unknown"),
+                    "location": item.get("city", "Remote") if not item.get("fullyRemote") else "Remote",
+                    "is_remote": item.get("fullyRemote", False) or item.get("remoteInterview", False),
+                    "apply_url": f"https://justjoin.it/offers/{item.get('id', '')}",
+                    "description": _clean_html(item.get("body", ""))[:5000],
+                    "source_board": "justjoin",
+                    "salary_min": salary_min,
+                    "salary_max": salary_max,
+                    "posted_at": item.get("publishedAt"),
+                })
+            return jobs
+        except Exception as e:
+            print(f"JustJoin error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# Remotive (multi-category) — extra categories beyond software-dev
+# ---------------------------------------------------------------------------
+class RemotiveDevOpsScraper:
+    def get_jobs(self): return RemotiveScraper().get_jobs(category="devops-sysadmin", limit=100)
+
+class RemotiveDataScraper:
+    def get_jobs(self): return RemotiveScraper().get_jobs(category="data", limit=100)
+
+
+# ---------------------------------------------------------------------------
+# WorkingNomads (multi-category)
+# ---------------------------------------------------------------------------
+class WorkingNomadsDevOpsScraper:
+    def get_jobs(self):
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            r = client.get("https://www.workingnomads.com/api/exposed_jobs/", params={"category": "devops-sysadmin"})
+            r.raise_for_status()
+            return [{
+                "title": i.get("title", ""),
+                "company_name": i.get("company_name", "Unknown"),
+                "location": i.get("region", "Worldwide"),
+                "is_remote": True,
+                "apply_url": i.get("url", ""),
+                "description": _clean_html(i.get("description", ""))[:5000],
+                "source_board": "workingnomads",
+                "posted_at": i.get("pub_date"),
+            } for i in r.json()[:80]]
+        except Exception as e:
+            print(f"WorkingNomads DevOps error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# WeWorkRemotely extra categories
+# ---------------------------------------------------------------------------
+class WWRDevOpsScraper:
+    def get_jobs(self):
+        return _parse_rss_feed(
+            "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
+            "weworkremotely",
+        )
+
+class WWRFrontendScraper:
+    def get_jobs(self):
+        return _parse_rss_feed(
+            "https://weworkremotely.com/categories/remote-front-end-programming-jobs.rss",
+            "weworkremotely",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Reddit (extra subreddits)
+# ---------------------------------------------------------------------------
+class RedditRemoteJSScraper:
+    def get_jobs(self):
+        return RedditScraper()._scrape_subreddit("remotejs", limit=50)
+
+
+# Monkey-patch helper so RedditScraper can be called per subreddit
+def _reddit_scrape_sub(self, sub: str, limit: int = 50) -> List[Dict]:
+    client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0 (job search bot)"})
+    try:
+        response = client.get(
+            f"https://old.reddit.com/r/{sub}/new.json",
+            params={"limit": limit},
+        )
+        if response.status_code != 200:
+            return []
+        data = response.json()
+        posts = data.get("data", {}).get("children", [])
+        jobs = []
+        for post in posts:
+            pd_ = post.get("data", {})
+            title = pd_.get("title", "")
+            if sub == "forhire" and "[hiring]" not in title.lower():
+                continue
+            company, job_title = self._parse_reddit_title(title)
+            jobs.append({
+                "title": job_title,
+                "company_name": company,
+                "location": "Remote" if _is_remote("", title, pd_.get("selftext", "")) else "Unknown",
+                "is_remote": _is_remote("", title, pd_.get("selftext", "")),
+                "apply_url": pd_.get("url", ""),
+                "description": (pd_.get("selftext", "") or "")[:5000],
+                "source_board": f"reddit_{sub}",
+                "posted_at": None,
+            })
+        return jobs
+    except Exception:
+        return []
+
+RedditScraper._scrape_subreddit = _reddit_scrape_sub
+
+
+# ---------------------------------------------------------------------------
+# Jobicy engineering (no category filter — catches all engineering roles)
+# ---------------------------------------------------------------------------
+class JobicyAllScraper:
+    def get_jobs(self):
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            resp = client.get("https://jobicy.com/api/v0/remote-jobs", params={"count": 50, "geo": "worldwide"})
+            resp.raise_for_status()
+            return [{
+                "title": i.get("jobTitle", ""),
+                "company_name": i.get("companyName", "Unknown"),
+                "location": i.get("jobGeo", "Worldwide"),
+                "is_remote": True,
+                "apply_url": i.get("url", ""),
+                "description": _clean_html(i.get("jobDescription", ""))[:5000],
+                "source_board": "jobicy",
+                "salary": i.get("annualSalaryMin"),
+                "posted_at": i.get("pubDate"),
+            } for i in resp.json().get("jobs", [])]
+        except Exception as e:
+            print(f"Jobicy all error: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
+# Freshremote.work — aggregator focused on fully-remote companies
+# ---------------------------------------------------------------------------
+class FreshRemoteScraper:
+    def get_jobs(self): return _parse_rss_feed("https://freshremote.work/feed/", "freshremote")
+
+
+# ---------------------------------------------------------------------------
+# PowerToFly — inclusive remote tech hiring, many small/mid startups
+# ---------------------------------------------------------------------------
+class PowerToFlyScraper:
+    def get_jobs(self): return _parse_rss_feed("https://powertofly.com/jobs/feed/", "powertofly")
+
+
+# ---------------------------------------------------------------------------
+# Remote First Jobs — exclusively remote-first companies
+# ---------------------------------------------------------------------------
+class RemoteFirstJobsScraper:
+    def get_jobs(self):
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+            resp = client.get("https://remotefirstjobs.com/api/jobs")
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("jobs", [])):
+                    jobs.append({
+                        "title": item.get("title", ""),
+                        "company_name": item.get("company", "Unknown"),
+                        "location": "Remote",
+                        "is_remote": True,
+                        "apply_url": item.get("url", ""),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "remotefirstjobs",
+                        "posted_at": item.get("created_at"),
+                    })
+                return jobs
+        except Exception:
+            pass
+        return _parse_rss_feed("https://remotefirstjobs.com/feed/", "remotefirstjobs")
+
+
 class HNJobStoriesScraper:
     """Dedicated HN /jobstories — YC company job posts."""
 
@@ -701,6 +1339,15 @@ def matches_criteria(job: Dict, criteria: Dict) -> bool:
             if min_mentioned > max_yoe:
                 return False
 
+    # Salary filter — only reject if we have hard data that doesn't fit
+    # (many jobs don't publish salary, so we let them through)
+    min_salary = criteria.get("min_salary")  # e.g. 40000
+    max_salary = criteria.get("max_salary")  # e.g. 100000
+    if min_salary and job.get("salary_max") and job["salary_max"] < min_salary:
+        return False
+    if max_salary and job.get("salary_min") and job["salary_min"] > max_salary:
+        return False
+
     return True
 
 
@@ -746,10 +1393,39 @@ def scrape_board_jobs(
         "arbeitnow": ("Arbeitnow", lambda: ArbeitnowScraper().get_jobs(limit=100)),
         "jobicy": ("Jobicy", lambda: JobicyScraper().get_jobs(limit=50)),
         "themuse": ("The Muse", lambda: TheMuseScraper().get_jobs(limit=100)),
+        "workingnomads": ("WorkingNomads", lambda: WorkingNomadsScraper().get_jobs(limit=100)),
+        "jobspresso": ("Jobspresso", lambda: JobspressoScraper().get_jobs(limit=50)),
+        "wfhio": ("WFH.io", lambda: WFHioScraper().get_jobs(limit=60)),
+        # --- NEW LOW-COMPETITION BOARDS ---
+        "remoteco": ("Remote.co", lambda: RemoteCo().get_jobs()),
+        "authenticjobs": ("Authentic Jobs", lambda: AuthenticJobsScraper().get_jobs()),
+        "djangojobs": ("DjangoJobs", lambda: DjangoJobsScraper().get_jobs()),
+        "larajobs": ("LaraJobs", lambda: LaraJobsScraper().get_jobs()),
+        "nodesk": ("NodeDesk", lambda: NodeDeskScraper().get_jobs()),
+        "4dayweek": ("4DayWeek", lambda: FourDayWeekScraper().get_jobs()),
+        "vuejobs": ("VueJobs", lambda: VueJobsScraper().get_jobs()),
+        "golangjobs": ("GolangJobs", lambda: GolangJobsScraper().get_jobs()),
+        "dynamitejobs": ("Dynamite Jobs", lambda: DynamiteJobsScraper().get_jobs()),
+        "smashingmag": ("Smashing Mag Jobs", lambda: SmashingMagJobsScraper().get_jobs()),
+        "devitjobs": ("DevITjobs EU", lambda: DevITJobsScraper().get_jobs(limit=100)),
+        "cryptojobslist": ("CryptoJobsList", lambda: CryptoJobsListScraper().get_jobs(limit=60)),
+        "web3career": ("Web3.career", lambda: Web3CareerScraper().get_jobs()),
+        "climatebase": ("ClimateBase", lambda: ClimateBaseScraper().get_jobs(limit=60)),
+        "justjoin": ("JustJoin.it", lambda: JustJoinScraper().get_jobs(limit=100)),
+        "remotive_devops": ("Remotive DevOps", lambda: RemotiveDevOpsScraper().get_jobs()),
+        "remotive_data": ("Remotive Data", lambda: RemotiveDataScraper().get_jobs()),
+        "workingnomads_devops": ("WorkingNomads DevOps", lambda: WorkingNomadsDevOpsScraper().get_jobs()),
+        "wwr_devops": ("WWR DevOps", lambda: WWRDevOpsScraper().get_jobs()),
+        "wwr_frontend": ("WWR Frontend", lambda: WWRFrontendScraper().get_jobs()),
+        "reddit_remotejs": ("Reddit RemoteJS", lambda: RedditScraper()._scrape_subreddit("remotejs", 50)),
+        "jobicy_all": ("Jobicy (all)", lambda: JobicyAllScraper().get_jobs()),
+        "freshremote": ("Fresh Remote", lambda: FreshRemoteScraper().get_jobs()),
+        "powertofly": ("PowerToFly", lambda: PowerToFlyScraper().get_jobs()),
+        "remotefirstjobs": ("Remote First Jobs", lambda: RemoteFirstJobsScraper().get_jobs()),
     }
 
     if boards is None:
-        boards = list(all_boards.keys())
+        boards = _get_enabled_boards(list(all_boards.keys()))
 
     stats = {"total_scraped": 0, "matched": 0, "saved": 0, "errors": 0, "by_board": {}}
     total_boards = len(boards)
