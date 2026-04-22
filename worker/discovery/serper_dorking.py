@@ -181,6 +181,34 @@ def _build_dork_queries() -> dict:
             ('"annual salary" "50" OR "60" "remote" "backend" OR "fullstack" "startup"', "salary"),
             ('site:jobs.lever.co "compensation" "remote" "engineer" "startup"', "lever"),
         ],
+        "linkedin_jobs": [
+            ('site:linkedin.com/jobs "remote" "backend engineer" "$40,000" OR "$50,000" OR "$60,000"', "linkedin"),
+            ('site:linkedin.com/jobs "fully remote" "software engineer" "1-50 employees" "apply"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "python developer" "startup" "salary" -"10,001+"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "full stack developer" "seed" OR "series a" salary', "linkedin"),
+            ('site:linkedin.com/jobs "worldwide" "backend" "engineer" "startup" "apply now"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "software engineer" "11-50 employees" "engineering"', "linkedin"),
+        ],
+        "pallet_boards": [
+            ('site:pallet.xyz "remote" "engineer" "backend" hiring', "pallet"),
+            ('site:pallet.xyz "remote" "developer" "startup" "apply"', "pallet"),
+            ('site:pallet.xyz "remote" "python" OR "golang" OR "fullstack"', "pallet"),
+            ('site:jobs.pallet.xyz "remote" "engineer" "startup"', "pallet"),
+        ],
+        "x_urgent_hiring": [
+            ('site:x.com "urgently hiring" "remote" "engineer" OR "developer"', "twitter"),
+            ('site:x.com "looking for a" "backend" OR "fullstack" "developer" "remote" "DM me"', "twitter"),
+            ('site:x.com "we need" "engineer" "remote" "startup" "ASAP" OR "immediately"', "twitter"),
+            ('site:x.com "join our team" "remote" "developer" "equity" OR "salary"', "twitter"),
+            ('site:x.com "hiring" "remote" "developer" "$" "startup" "apply"', "twitter"),
+        ],
+        "salary_transparent": [
+            ('site:glassdoor.com "remote" "backend engineer" "$40,000" OR "$50,000" OR "$60,000" "startup"', "glassdoor"),
+            ('site:cord.co "remote" "engineer" "£" OR "$" "startup"', "cord"),
+            ('site:hired.com "remote" "software engineer" "backend" salary', "hired"),
+            ('"salary" "$40k" OR "$50k" OR "$60k" "remote" "engineer" "startup" -linkedin -glassdoor -indeed', "salary"),
+            ('site:wellfound.com "compensation" "$40k" OR "$50k" OR "$60k" "remote" "engineer"', "wellfound"),
+        ],
     }
 
 DORK_QUERIES = _build_dork_queries()
@@ -284,6 +312,55 @@ class SerperDorker:
             }
         return None
 
+    def extract_company_from_linkedin(self, url: str, title: str, snippet: str) -> Optional[Dict]:
+        """Extract company + apply URL from a LinkedIn job listing URL."""
+        # URL: linkedin.com/jobs/view/job-title-at-company-123456
+        m = re.search(r"linkedin\.com/jobs/view/(.+?)(?:\?|$)", url)
+        slug = m.group(1) if m else ""
+        # Try to extract company from title: "Job Title at Company | LinkedIn"
+        company_name = None
+        for pat in [
+            r"\bat\s+(.+?)\s*\|",
+            r"\bat\s+(.+?)$",
+            r"[-–]\s*(.+?)\s*\|",
+        ]:
+            cm = re.search(pat, title, re.IGNORECASE)
+            if cm:
+                company_name = cm.group(1).strip()
+                break
+        if not company_name and slug:
+            # slug: "backend-engineer-at-company-name-123456" → parse out name
+            parts = re.split(r"-at-", slug, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2:
+                company_name = re.sub(r"-\d+$", "", parts[1]).replace("-", " ").title()
+        if not company_name:
+            company_name = "Unknown (LinkedIn)"
+        return {
+            "name": company_name,
+            "career_url": url,
+            "website": "",
+            "ats_type": "unknown",
+            "job_title_hint": title,
+            "source_category": "linkedin",
+        }
+
+    def extract_company_from_pallet(self, url: str, title: str, snippet: str) -> Optional[Dict]:
+        """Extract company from a Pallet.xyz job board URL."""
+        # URL: https://company.pallet.xyz/jobs or https://jobs.pallet.xyz/company/...
+        m = re.search(r"([^/]+)\.pallet\.xyz", url)
+        if not m:
+            m = re.search(r"pallet\.xyz/(?:jobs/)?([^/]+)", url)
+        slug = m.group(1) if m else ""
+        name = slug.replace("-", " ").title() if slug else "Unknown (Pallet)"
+        return {
+            "name": name,
+            "career_url": url,
+            "website": f"https://{slug}.pallet.xyz" if slug else "",
+            "ats_type": "pallet",
+            "job_title_hint": title,
+            "source_category": "pallet",
+        }
+
     def extract_company_from_generic(self, url: str, title: str, snippet: str) -> Optional[Dict]:
         """Extract company info from generic career/jobs pages."""
         parsed = urlparse(url)
@@ -348,7 +425,15 @@ class SerperDorker:
                 company = self.extract_company_from_ashby(url, title)
             elif "wellfound.com" in url:
                 company = self.extract_company_from_wellfound(url, title, snippet)
-            elif category in ("career_page", "hidden", "regional", "distress", "funding", "twitter", "yc", "indiehackers", "hackernews"):
+            elif "linkedin.com" in url:
+                company = self.extract_company_from_linkedin(url, title, snippet)
+            elif "pallet.xyz" in url or "jobs.pallet.xyz" in url:
+                company = self.extract_company_from_pallet(url, title, snippet)
+            elif "cord.co" in url:
+                company = self.extract_company_from_generic(url, title, snippet)
+            elif category in ("career_page", "hidden", "regional", "distress", "funding", "twitter",
+                               "yc", "indiehackers", "hackernews", "salary", "glassdoor", "hired",
+                               "linkedin", "pallet"):
                 company = self.extract_company_from_generic(url, title, snippet)
 
             if company:
@@ -391,6 +476,12 @@ class SerperDorker:
             "arbeitnow": 6,
             "jobicy": 6,
             "twitter": 8,
+            "linkedin": 8,
+            "pallet": 9,
+            "cord": 8,
+            "salary": 9,
+            "glassdoor": 7,
+            "hired": 8,
         }
 
         return {

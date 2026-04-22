@@ -29,6 +29,7 @@ _ALL_BOARD_KEYS = [
     "jobspresso","wfhio","remoteco","authenticjobs","nodesk","4dayweek","dynamitejobs",
     "freshremote","remotefirstjobs","devitjobs","djangojobs","larajobs","vuejobs","golangjobs",
     "smashingmag","cryptojobslist","web3career","climatebase","powertofly",
+    "cord","wellfound","hired","talentio","pallet",
 ]
 _enabled_boards = set(_get_enabled_boards(_ALL_BOARD_KEYS))
 def _on(key): return key in _enabled_boards
@@ -133,6 +134,13 @@ with tab1:
         board_golangjobs = st.checkbox("GolangJobs (Go)", value=_on("golangjobs"), key="b_go")
         board_smashingmag = st.checkbox("Smashing Magazine Jobs (frontend/dev)", value=_on("smashingmag"), key="b_smsh")
 
+        st.caption("── Salary-transparent / low-fraud ──")
+        board_cord = st.checkbox("Cord.co (salary always shown, startup-verified)", value=_on("cord"), key="b_cord")
+        board_wellfound = st.checkbox("Wellfound (AngelList, startup salary data)", value=_on("wellfound"), key="b_wf")
+        board_hired = st.checkbox("Hired.com (salary-first, companies apply to you)", value=_on("hired"), key="b_hrd")
+        board_talentio = st.checkbox("Talent.io (EU tech, salary upfront)", value=_on("talentio"), key="b_tio")
+        board_pallet = st.checkbox("Pallet Boards (indie startup job boards)", value=_on("pallet"), key="b_plt")
+
         st.caption("── Startup / Niche / Web3 ──")
         board_cryptojobslist = st.checkbox("CryptoJobsList (web3 startups, remote-first)", value=_on("cryptojobslist"), key="b_crypto")
         board_web3career = st.checkbox("Web3.career (blockchain startups)", value=_on("web3career"), key="b_w3c")
@@ -192,6 +200,11 @@ with tab1:
         (board_vuejobs, "vuejobs"),
         (board_golangjobs, "golangjobs"),
         (board_smashingmag, "smashingmag"),
+        (board_cord, "cord"),
+        (board_wellfound, "wellfound"),
+        (board_hired, "hired"),
+        (board_talentio, "talentio"),
+        (board_pallet, "pallet"),
         (board_cryptojobslist, "cryptojobslist"),
         (board_web3career, "web3career"),
         (board_climatebase, "climatebase"),
@@ -341,6 +354,8 @@ with tab2:
             "remotefirstjobs", "devitjobs",
             # Tech-specific
             "djangojobs", "larajobs", "vuejobs", "golangjobs", "smashingmag",
+            # Salary-transparent
+            "cord", "wellfound", "hired", "talentio", "pallet",
             # Startup/niche
             "cryptojobslist", "web3career", "climatebase", "powertofly",
             # Communities

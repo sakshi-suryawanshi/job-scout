@@ -1245,6 +1245,165 @@ class RemoteFirstJobsScraper:
         return _parse_rss_feed("https://remotefirstjobs.com/feed/", "remotefirstjobs")
 
 
+# ---------------------------------------------------------------------------
+# Cord.co — UK/global startup jobs, salary always shown, verified companies
+# ---------------------------------------------------------------------------
+class CordScraper:
+    """https://cord.co — startup jobs with transparent salary. Free public API."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={
+                "User-Agent": "JobScout/1.0",
+                "Accept": "application/json",
+            })
+            resp = client.get(
+                "https://cord.co/api/jobs",
+                params={"remote": "true", "limit": limit},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("jobs", data.get("results", [])))[:limit]:
+                    company = item.get("company", {}) or {}
+                    sal = item.get("salary", {}) or {}
+                    sal_min = sal.get("min") or sal.get("minimum") or item.get("salary_min")
+                    sal_max = sal.get("max") or sal.get("maximum") or item.get("salary_max")
+                    jobs.append({
+                        "title": item.get("title", item.get("role", "")),
+                        "company_name": company.get("name", item.get("company_name", "Unknown")),
+                        "location": item.get("location", "Remote"),
+                        "is_remote": item.get("remote", True),
+                        "apply_url": item.get("url", item.get("apply_url", "")),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "cord",
+                        "salary_min": int(sal_min) if sal_min else None,
+                        "salary_max": int(sal_max) if sal_max else None,
+                        "posted_at": item.get("created_at") or item.get("published_at"),
+                    })
+                return jobs
+        except Exception:
+            pass
+        # RSS fallback
+        return _parse_rss_feed("https://cord.co/jobs/remote.rss", "cord", limit)
+
+
+# ---------------------------------------------------------------------------
+# Wellfound (AngelList) — startup jobs via RSS, salary shown on many listings
+# ---------------------------------------------------------------------------
+class WellfoundScraper:
+    """Wellfound.com startup job listings — salary-transparent, verified startups."""
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        # Try multiple Wellfound RSS/API endpoints
+        for url in [
+            "https://wellfound.com/jobs/software-engineer.rss",
+            "https://angel.co/job_listings.rss",
+            "https://wellfound.com/jobs.rss",
+        ]:
+            jobs = _parse_rss_feed(url, "wellfound", limit)
+            if jobs:
+                return jobs
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Hired.com — salary-first marketplace, companies apply to you
+# ---------------------------------------------------------------------------
+class HiredScraper:
+    """https://hired.com — salary-first job marketplace. Companies bid on you."""
+
+    def get_jobs(self, limit: int = 80) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0", "Accept": "application/json"})
+            resp = client.get(
+                "https://hired.com/api/v1/job_listings",
+                params={"remote": 1, "limit": limit},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("job_listings", []))[:limit]:
+                    jobs.append({
+                        "title": item.get("title", item.get("job_function", "")),
+                        "company_name": item.get("company", {}).get("name", "Unknown") if isinstance(item.get("company"), dict) else str(item.get("company", "Unknown")),
+                        "location": item.get("locations", ["Remote"])[0] if item.get("locations") else "Remote",
+                        "is_remote": item.get("remote", False) or "remote" in str(item.get("locations", [])).lower(),
+                        "apply_url": item.get("url", ""),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "hired",
+                        "salary_min": item.get("salary_min") or item.get("min_salary"),
+                        "salary_max": item.get("salary_max") or item.get("max_salary"),
+                        "posted_at": item.get("created_at"),
+                    })
+                return jobs
+        except Exception:
+            pass
+        return _parse_rss_feed("https://hired.com/jobs/rss", "hired", limit)
+
+
+# ---------------------------------------------------------------------------
+# Talent.io — EU tech jobs, salary always shown upfront, verified companies
+# ---------------------------------------------------------------------------
+class TalentioScraper:
+    """https://www.talent.io — EU tech job marketplace, transparent salary."""
+
+    def get_jobs(self, limit: int = 80) -> List[Dict]:
+        try:
+            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0", "Accept": "application/json"})
+            resp = client.get(
+                "https://api.talent.io/api/v1/public/jobs",
+                params={"remote": "true", "limit": limit, "type": "permanent"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                jobs = []
+                for item in (data if isinstance(data, list) else data.get("jobs", data.get("results", [])))[:limit]:
+                    sal = item.get("salary", {}) or item.get("compensation", {}) or {}
+                    jobs.append({
+                        "title": item.get("title", item.get("name", "")),
+                        "company_name": (item.get("company", {}) or {}).get("name", "Unknown"),
+                        "location": item.get("location", "Remote"),
+                        "is_remote": item.get("remote", True),
+                        "apply_url": item.get("url", item.get("apply_url", "")),
+                        "description": _clean_html(item.get("description", ""))[:5000],
+                        "source_board": "talentio",
+                        "salary_min": sal.get("min") or sal.get("minimum"),
+                        "salary_max": sal.get("max") or sal.get("maximum"),
+                        "posted_at": item.get("created_at") or item.get("published_at"),
+                    })
+                return jobs
+        except Exception as e:
+            print(f"Talent.io error: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Pallet.xyz — hundreds of indie startup job boards in one
+# ---------------------------------------------------------------------------
+class PalletScraper:
+    """Pallet.xyz — small startup job boards (many indie devs/startups use this)."""
+
+    # Known active Pallet board slugs — each is a separate startup community board
+    BOARDS = [
+        "pragmaticengineer", "levels", "lenny", "techleadhub", "highgrowthengineer",
+        "remotepython", "devtoolsdigest", "swizec", "buildspace", "the-open-source-observer",
+    ]
+
+    def get_jobs(self, limit: int = 100) -> List[Dict]:
+        jobs = []
+        for board in self.BOARDS:
+            board_jobs = _parse_rss_feed(
+                f"https://{board}.pallet.xyz/jobs/rss",
+                "pallet",
+                limit=20,
+            )
+            jobs.extend(board_jobs)
+            if len(jobs) >= limit:
+                break
+        return jobs[:limit]
+
+
 class HNJobStoriesScraper:
     """Dedicated HN /jobstories — YC company job posts."""
 
@@ -1422,6 +1581,12 @@ def scrape_board_jobs(
         "freshremote": ("Fresh Remote", lambda: FreshRemoteScraper().get_jobs()),
         "powertofly": ("PowerToFly", lambda: PowerToFlyScraper().get_jobs()),
         "remotefirstjobs": ("Remote First Jobs", lambda: RemoteFirstJobsScraper().get_jobs()),
+        # --- SALARY-TRANSPARENT / LOW-FRAUD BOARDS ---
+        "cord": ("Cord.co", lambda: CordScraper().get_jobs(limit=100)),
+        "wellfound": ("Wellfound", lambda: WellfoundScraper().get_jobs(limit=100)),
+        "hired": ("Hired.com", lambda: HiredScraper().get_jobs(limit=80)),
+        "talentio": ("Talent.io", lambda: TalentioScraper().get_jobs(limit=80)),
+        "pallet": ("Pallet Boards", lambda: PalletScraper().get_jobs(limit=100)),
     }
 
     if boards is None:

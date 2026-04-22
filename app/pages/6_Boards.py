@@ -63,6 +63,12 @@ ALL_BOARDS = {
     "web3career":        ("Web3.career",           "Startup niche",   "Blockchain/crypto developer jobs. RSS. Many small startups.", False),
     "climatebase":       ("ClimateBase",           "Startup niche",   "Climate tech startups. Mission-driven. Remote. Often urgent hiring.", False),
     "powertofly":        ("PowerToFly",            "Startup niche",   "Inclusive remote tech hiring. RSS. Mid-size companies.", False),
+    # ── Salary-transparent / low-fraud ────────────────────────────────────────
+    "cord":              ("Cord.co",               "Salary transparent", "UK/global startup jobs. Salary always shown. Verified companies only.", True),
+    "wellfound":         ("Wellfound",             "Salary transparent", "Startup-only job board. Salary shown. ATS verified. AngelList successor.", True),
+    "hired":             ("Hired.com",             "Salary transparent", "Salary-first marketplace. $40-80k focus. Companies apply to you.", True),
+    "talentio":          ("Talent.io",             "Salary transparent", "EU tech jobs. Salary always upfront. Vetted companies.", True),
+    "pallet":            ("Pallet Boards",         "Salary transparent", "Hundreds of indie startup job boards. Very small audiences.", True),
 }
 
 

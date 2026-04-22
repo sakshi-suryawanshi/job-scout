@@ -394,6 +394,8 @@ def _rule_based_score(job: Dict, criteria: Dict) -> int:
         "nodesk", "4dayweek", "vuejobs", "golangjobs", "dynamitejobs", "smashingmag",
         "devitjobs", "cryptojobslist", "web3career", "climatebase", "freshremote",
         "powertofly", "remotefirstjobs", "jobicy_all",
+        # salary-transparent boards get bonus too (verified legit companies)
+        "cord", "wellfound", "hired", "talentio", "pallet",
     }
     if job.get("source_board") in low_competition_boards:
         score += 5

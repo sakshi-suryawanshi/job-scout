@@ -61,6 +61,10 @@ with tab1:
         "yc_latest": "🚀 Latest YC Batch — newest YC companies hiring remotely",
         "twitter_x": "🐦 Twitter/X — startups posting hiring on X (via Serper)",
         "salary_targeted": "💵 Salary Targeted — explicitly $40k-$70k remote roles",
+        "linkedin_jobs": "💼 LinkedIn Jobs — remote roles via Google dorking (no scraping)",
+        "pallet_boards": "🎨 Pallet Boards — indie startup job boards (site:pallet.xyz)",
+        "x_urgent_hiring": "🚨 X Urgent Hiring — founders posting urgently on X/Twitter",
+        "salary_transparent": "🏷️ Salary Transparent — Glassdoor/Cord/Hired with $40-60k shown",
     }
 
     col1, col2 = st.columns(2)
@@ -69,7 +73,11 @@ with tab1:
     for i, (cat, desc) in enumerate(category_descriptions.items()):
         target_col = col1 if i % 2 == 0 else col2
         with target_col:
-            if st.checkbox(desc, value=cat in ("distress_signals", "hidden_gems", "funding_signals", "yc_latest", "job_boards", "salary_targeted"), key=f"cat_{cat}"):
+            if st.checkbox(desc, value=cat in (
+                "distress_signals", "hidden_gems", "funding_signals", "yc_latest",
+                "job_boards", "salary_targeted", "linkedin_jobs", "pallet_boards",
+                "x_urgent_hiring", "salary_transparent",
+            ), key=f"cat_{cat}"):
                 selected_categories.append(cat)
 
     # Budget controls
