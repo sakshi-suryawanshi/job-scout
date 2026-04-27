@@ -37,3 +37,8 @@ Thumbs.db
 
 # Scraped job cache
 jobs_cache/
+
+# Personal planning docs (kept local, not for showcase repo)
+notes.txt
+v2_notes.md
+V2_PLAN.md
