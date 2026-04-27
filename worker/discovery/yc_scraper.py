@@ -162,20 +162,38 @@ class YCScraperV2:
         }
 
 
-def fetch_yc_companies_v2(batch: Optional[str] = None, limit: int = 100) -> List[Dict]:
-    """Convenience function"""
+def fetch_yc_companies(batch: Optional[str] = None, limit: int = 100, enrich: bool = False) -> List[Dict]:
+    """
+    Convenience function.
+
+    Args:
+        batch: YC batch code like "W24" or "S23". None = fetch all.
+        limit: max number of companies to return.
+        enrich: reserved for future ATS-slug enrichment from each company's website.
+                Currently a no-op; accepted so callers don't break.
+    """
     scraper = YCScraperV2()
-    
+
     if batch:
         raw = scraper.fetch_by_batch(batch)
     else:
         raw = scraper.fetch_from_github()
-    
+
     # Convert to DB format
     db_companies = [scraper.to_db_format(c) for c in raw]
-    
+
     # Filter valid
     valid = [c for c in db_companies if c.get("name") and c.get("career_url")]
-    
+
+    # TODO(v2): when enrich=True, follow each company's website and detect
+    # boards.greenhouse.io / jobs.lever.co / jobs.ashbyhq.com slugs to set
+    # ats_type and career_url precisely. See V2_PLAN.md item #10.
+    if enrich:
+        pass  # Placeholder so the parameter is accepted
+
     print(f"✅ Returning {len(valid)} valid companies (requested limit: {limit})")
     return valid[:limit]
+
+
+# Backward-compat alias for any code still referencing the v2 name
+fetch_yc_companies_v2 = fetch_yc_companies
