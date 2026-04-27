@@ -87,7 +87,7 @@ class HackerNewsScraper:
 
     def _parse_hn_comment(self, text: str, thread_id: str) -> Optional[Dict]:
         clean = clean_html(text)
-        lines = [l.strip() for l in clean.split("\n") if l.strip()]
+        lines = [line.strip() for line in clean.split("\n") if line.strip()]
         if not lines:
             return None
         first_line = lines[0]
@@ -119,7 +119,6 @@ class RedditScraper:
     SUBREDDITS = ["forhire", "remotejs"]
 
     def get_jobs(self, limit_per_sub: int = 50) -> List[Dict]:
-        client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0 (job search bot)"})
         jobs = []
         for sub in self.SUBREDDITS:
             jobs.extend(self._scrape_subreddit(sub, limit_per_sub))

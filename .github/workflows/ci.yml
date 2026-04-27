@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install httpx pytest ruff
+
+      - name: Lint with ruff
+        run: ruff check job_scout/ tests/ --select E,F,W --ignore E501,W291,W293
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short

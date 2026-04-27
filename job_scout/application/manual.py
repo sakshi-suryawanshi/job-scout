@@ -42,19 +42,6 @@ def prepare_manual_apply(
         except Exception as e:
             print(f"cover letter generation error: {e}")
 
-    prefilled = {
-        "name":          profile.get("full_name", ""),
-        "first_name":    profile.get("first_name", ""),
-        "last_name":     profile.get("last_name", ""),
-        "email":         profile.get("email", ""),
-        "phone":         profile.get("phone", ""),
-        "linkedin_url":  profile.get("linkedin_url", ""),
-        "github_url":    profile.get("github_url", ""),
-        "portfolio_url": profile.get("portfolio_url", ""),
-        "resume_text":   resume_text,
-        "cover_letter":  cover_letter,
-    }
-
     return ApplyResult(
         status="needs_attention",
         tier=2,

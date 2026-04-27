@@ -122,8 +122,6 @@ Email body:"""
 
 
 def _fallback_body(job: Dict, resume_text: str, profile: Dict) -> str:
-    company_info = job.get("companies", {}) or {}
-    company_name = company_info.get("name", "") or job.get("company_name", "Unknown")
     name = profile.get("full_name", "")
     title = job.get("title", "engineering role")
     return (

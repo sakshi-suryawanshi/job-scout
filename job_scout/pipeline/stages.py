@@ -282,7 +282,8 @@ def stage_auto_apply(db, config: Dict = None) -> Dict:
         stats.update(result)
     except Exception as e:
         print(f"  auto-apply stage error: {e}")
-        import traceback; traceback.print_exc()
+        import traceback
+        traceback.print_exc()
 
     print(f"Stage 6 AUTO-APPLY: {stats}")
     return stats
@@ -372,7 +373,6 @@ def _load_criteria(db, config: Dict) -> Dict:
 def _build_subject(run_stats: Dict) -> str:
     from datetime import date
     scrape = run_stats.get("scrape", {})
-    score = run_stats.get("score", {})
     auto_apply = run_stats.get("auto_apply", {})
     new = scrape.get("jobs_new", 0)
     applied = auto_apply.get("would_apply", 0)

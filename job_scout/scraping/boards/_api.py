@@ -143,13 +143,13 @@ class TheMuseScraper:
             ).json()
             jobs = []
             for i in data.get("results", [])[:limit]:
-                locs = [l.get("name", "") for l in i.get("locations", [])]
+                locs = [loc.get("name", "") for loc in i.get("locations", [])]
                 location = ", ".join(locs) or "Remote"
                 jobs.append({
                     "title": i.get("name", ""),
                     "company_name": (i.get("company", {}) or {}).get("name", "Unknown"),
                     "location": location,
-                    "is_remote": any("remote" in l.lower() for l in locs) or is_remote(location, i.get("name", "")),
+                    "is_remote": any("remote" in loc.lower() for loc in locs) or is_remote(location, i.get("name", "")),
                     "apply_url": (i.get("refs", {}) or {}).get("landing_page", ""),
                     "description": clean_html(i.get("contents", ""))[:5000],
                     "source_board": "themuse",

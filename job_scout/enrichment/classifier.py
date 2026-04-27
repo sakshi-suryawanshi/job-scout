@@ -22,7 +22,7 @@ _FUNDING_KEYWORDS = re.compile(
 _YC_PATTERN = re.compile(r"\bYC\s*[WS]\d{2}\b|\bY\s*Combinator\b", re.IGNORECASE)
 
 _ASAP_PATTERN = re.compile(
-    r"\b(asap|urgent|immediately|start\s+now|hire\s+fast|right\s+away)\b",
+    r"\b(asap|urgent(ly)?|immediately|start\s+now|hire\s+fast|right\s+away)\b",
     re.IGNORECASE,
 )
 

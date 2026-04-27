@@ -146,7 +146,8 @@ def run_pipeline(
                 add_stage_result(run_id, name, "success", result)
         except Exception as e:
             print(f"Stage {stage_num} ({name}) FAILED: {e}")
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             run_stats[name] = {"error": str(e)}
             pipeline_status = "partial"
             if run_id:

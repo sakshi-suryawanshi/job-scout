@@ -15,14 +15,22 @@ def _eval_condition(job: Dict, cond: Dict) -> bool:
 
     job_val = job.get(field)
 
-    if op == ">=":   return (job_val or 0) >= value
-    if op == "<=":   return (job_val or 0) <= value
-    if op == ">":    return (job_val or 0) > value
-    if op == "<":    return (job_val or 0) < value
-    if op == "==":   return job_val == value
-    if op == "!=":   return job_val != value
-    if op == "in":   return job_val in (value or [])
-    if op == "not_in": return job_val not in (value or [])
+    if op == ">=":
+        return (job_val or 0) >= value
+    if op == "<=":
+        return (job_val or 0) <= value
+    if op == ">":
+        return (job_val or 0) > value
+    if op == "<":
+        return (job_val or 0) < value
+    if op == "==":
+        return job_val == value
+    if op == "!=":
+        return job_val != value
+    if op == "in":
+        return job_val in (value or [])
+    if op == "not_in":
+        return job_val not in (value or [])
     if op == "any_in":
         # job_val can be a list (e.g. categories) or a string
         if isinstance(job_val, list):

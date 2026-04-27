@@ -18,6 +18,8 @@ except Exception:
 
 SERPER_API_URL = "https://google.serper.dev/search"
 
+_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+
 # ---------------------------------------------------------------------------
 # Usage tracking — now backed by DB via api_usage table (migration 009).
 # JSON file fallback kept for local dev without DB.
@@ -54,6 +56,8 @@ def _save_serper_usage(data: dict):
 
 
 def get_serper_usage() -> dict:
+    if _DEMO_MODE:
+        return {"calls_this_month": 78, "remaining": 2422, "limit": 2500, "cooldowns": {}}
     data = _load_serper_usage()
     month_key = date.today().strftime("%Y-%m")
     monthly_calls = data.get("monthly", {}).get(month_key, 0)
@@ -244,6 +248,8 @@ class SerperDorker:
         self.queries_used = 0
 
     def search(self, query: str, num_results: int = 10) -> List[Dict]:
+        if _DEMO_MODE:
+            return []  # Return empty in demo mode — no real searches
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
         try:
             response = self.client.post(SERPER_API_URL, json={"q": query, "num": num_results}, headers=headers)
@@ -484,7 +490,8 @@ def parse_serper_result_as_job(result: Dict, source_category: str) -> Optional[D
         lo, hi = int(salary_match.group(1)), int(salary_match.group(2))
         salary_min = lo * 1000 if lo < 300 else lo
         salary_max = hi * 1000 if hi < 300 else hi
-    import hashlib, json as _json
+    import hashlib
+    import json as _json
     fingerprint = hashlib.sha256(
         _json.dumps({"title": job_title, "company": company_name, "url": url}, sort_keys=True).encode()
     ).hexdigest()

@@ -14,6 +14,8 @@ try:
 except Exception:
     pass
 
+_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+
 _USAGE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     ".streamlit", "usage.json",
@@ -43,6 +45,8 @@ def _save_usage(data: dict):
 
 
 def get_gemini_usage_today() -> dict:
+    if _DEMO_MODE:
+        return {"calls": 42, "remaining": 1458, "limit": 1500}
     data = _load_usage()
     calls = data.get("gemini_calls", 0)
     return {"calls": calls, "remaining": 1500 - calls, "limit": 1500}
@@ -59,6 +63,8 @@ class GeminiClient:
         self.requests_made = 0
 
     def generate(self, prompt: str, max_tokens: int = 2048) -> Optional[str]:
+        if _DEMO_MODE:
+            return "Demo mode — Gemini response mocked. Set DEMO_MODE=false and add GEMINI_API_KEY to enable."
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2},
