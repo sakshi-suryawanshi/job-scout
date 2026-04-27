@@ -118,13 +118,26 @@ with tab1:
                         st.session_state.refresh = True
                         st.rerun()
                     
-                    # Delete
+                    # Delete — uses session_state for two-step confirmation
+                    # so the checkbox state survives Streamlit reruns
+                    confirm_key = f"confirm_delete_{selected_id}"
+
                     if st.button("🗑️ Delete Company", use_container_width=True, type="secondary"):
-                        if st.checkbox("Confirm deletion - this cannot be undone"):
-                            db.delete_company(selected_id)
-                            st.success("Company deleted!")
-                            st.session_state.refresh = True
-                            st.rerun()
+                        st.session_state[confirm_key] = True
+
+                    if st.session_state.get(confirm_key):
+                        st.warning("⚠️ Are you sure? This cannot be undone.")
+                        cdel1, cdel2 = st.columns(2)
+                        with cdel1:
+                            if st.button("Yes, delete permanently", key=f"confirm_yes_{selected_id}", type="primary", use_container_width=True):
+                                db.delete_company(selected_id)
+                                st.session_state.pop(confirm_key, None)
+                                st.success("Company deleted!")
+                                st.rerun()
+                        with cdel2:
+                            if st.button("Cancel", key=f"confirm_no_{selected_id}", use_container_width=True):
+                                st.session_state.pop(confirm_key, None)
+                                st.rerun()
                 
                 # Edit form
                 with st.expander("✏️ Full Edit"):
