@@ -6,5 +6,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ./.streamlit:/app/.streamlit:ro
+      - ./.streamlit:/app/.streamlit:rw
+      - ./data:/app/data
     restart: unless-stopped
