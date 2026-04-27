@@ -1,0 +1,24 @@
+-- Migration 001: Capture V1 schema baseline
+-- No DDL changes. Documents the schema as it existed before V2 work.
+--
+-- Tables: companies (357 rows), jobs (484 rows), signals (0), scrape_queue (0), user_profile (0)
+--
+-- companies: id, name, website, career_url, ats_type, source, is_active, priority_score,
+--            funding_stage, headcount, regions, is_remote_first, notes, last_scraped,
+--            created_at, updated_at
+--
+-- jobs: id, company_id, title, location, is_remote, apply_url, source_board, fingerprint,
+--       source_boards (csv), match_score, match_reason, is_new, is_recommended, user_action,
+--       desperation_score, desperation_signals, applied_date, follow_up_date,
+--       cover_letter_snippet, description, discovered_date, discovered_at
+--
+-- signals: id, signal_type, confidence_score, source_signal, metadata, processed,
+--          company_id, created_at
+--
+-- scrape_queue: id, company_id, priority, status, error_message, scheduled_at,
+--               started_at, completed_at
+--
+-- user_profile: id, resume_text, resume_summary, skills, preferred_roles,
+--               experience_years, updated_at
+
+SELECT 1; -- no-op so Supabase migration runner has valid SQL
