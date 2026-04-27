@@ -41,12 +41,15 @@ tab_run, tab_rules, tab_history = st.tabs(["▶ Run Now", "📋 Auto-Apply Rules
 with tab_run:
     st.subheader("Manual Pipeline Run")
     st.markdown("""
-The full pipeline:
-1. **Discover** — YC + alternative sources
+The full 8-stage pipeline:
+1. **Discover** — YC + remoteintech + Serper dorking
 2. **Scrape** — all enabled ATS + boards
-3. **Enrich** — remote filter + desperation scoring
-4. **Score** — rule-based pre-filter → Gemini AI
-5. **Digest** — summary of what was found
+3. **Enrich** — desperation scoring
+4. **Classify** — multi-label job categories
+5. **Score** — rule-based pre-filter → Gemini AI
+6. **Auto-Apply** — evaluate rules, tag queued jobs (Playwright apply in Step 6)
+7. **Follow-Ups** — find overdue applications
+8. **Digest** — compose + email daily summary
     """)
 
     c1, c2 = st.columns(2)
@@ -61,114 +64,48 @@ The full pipeline:
     st.info("⚙️ Auto-apply (Stage 6) is coming in a later V2 phase. For now, use Jobs → Apply Queue.")
 
     if st.button("▶ Run Pipeline Now", type="primary", use_container_width=True):
-        from job_scout.db.repositories.pipeline_runs import create_run, complete_run, add_stage_result
+        import os
 
-        run = create_run(triggered_by="manual")
-        run_id = run["id"] if run else None
+        # Inject API keys from secrets
+        for k in ("GEMINI_API_KEY", "SERPER_API_KEY"):
+            try:
+                val = st.secrets.get(k)
+                if val:
+                    os.environ[k] = val
+            except Exception:
+                pass
 
-        progress = st.progress(0)
+        from job_scout.pipeline.daily_run import run_pipeline, build_config
+
+        cfg = build_config()
+        cfg["max_slugs_per_ats"] = max_scrape
+        cfg["use_ai"] = use_ai
+
+        selected_stages = []
+        if run_discover: selected_stages.extend([1])
+        if run_scrape:   selected_stages.extend([2, 3, 4])
+        if run_score:    selected_stages.append(5)
+        selected_stages.extend([6, 7, 8])
+
+        progress_bar = st.progress(0)
         status_el = st.empty()
-        all_stats = {}
 
+        status_el.write("**Running pipeline...**")
         try:
-            # Stage 1: Discover
-            if run_discover:
-                status_el.write("**Stage 1: Discovery...**")
-                progress.progress(0.1)
-                from job_scout.discovery.yc import fetch_yc_companies
-                from job_scout.discovery.alternative import fetch_alternative_sources
-                existing = {c["name"].lower() for c in db.get_companies(active_only=False, limit=10000)}
-                new_cos = []
-                try:
-                    yc = fetch_yc_companies(batch="W24", limit=100)
-                    new_cos += [c for c in yc if (c.get("name") or "").lower() not in existing]
-                except Exception:
-                    pass
-                try:
-                    alt = fetch_alternative_sources()
-                    new_cos += [c for c in alt if (c.get("name") or "").lower() not in existing]
-                except Exception:
-                    pass
-                inserted = db.add_companies_bulk(new_cos) if new_cos else 0
-                all_stats["discover"] = {"new_companies": inserted}
-                if run_id:
-                    add_stage_result(run_id, "discover", "success", {"new_companies": inserted})
-
-            # Stage 2: Scrape
-            if run_scrape:
-                status_el.write("**Stage 2: Scraping jobs...**")
-                progress.progress(0.3)
-                from job_scout.scraping.ats import scrape_ats_jobs
-                from job_scout.scraping.boards import scrape_board_jobs
-
-                prefs = {}
-                try:
-                    r = db._request("GET", "user_profile", params={"limit": 1})
-                    prefs = (r[0].get("preferences") or {}) if r else {}
-                except Exception:
-                    pass
-                criteria = {
-                    "title_keywords": prefs.get("title_keywords", ["backend", "developer", "engineer", "python", "golang"]),
-                    "required_skills": prefs.get("skills", []),
-                    "exclude_keywords": prefs.get("exclude_keywords", ["staff", "principal", "director", "vp"]),
-                    "remote_only": prefs.get("remote_only", True),
-                    "global_remote_only": prefs.get("global_remote", True),
-                    "max_yoe": prefs.get("max_yoe", 5),
-                }
-
-                ats_stats = scrape_ats_jobs(db=db, criteria=criteria, max_slugs_per_ats=max_scrape)
-                board_stats = scrape_board_jobs(db=db, criteria=criteria)
-                all_stats["scrape"] = {
-                    "ats_saved": ats_stats.get("saved", 0),
-                    "boards_saved": board_stats.get("saved", 0),
-                    "total_new": ats_stats.get("saved", 0) + board_stats.get("saved", 0),
-                }
-                if run_id:
-                    add_stage_result(run_id, "scrape", "success", all_stats["scrape"])
-
-            # Stage 4: Score
-            if run_score:
-                status_el.write("**Stage 4: Scoring jobs...**")
-                progress.progress(0.7)
-                import os
-                from job_scout.ai.gemini import score_all_jobs
-                gemini_key = os.getenv("GEMINI_API_KEY", "")
-                try:
-                    gemini_key = gemini_key or st.secrets.get("GEMINI_API_KEY", "")
-                except Exception:
-                    pass
-                if gemini_key and use_ai:
-                    os.environ["GEMINI_API_KEY"] = gemini_key
-                prefs2 = prefs if run_scrape else {}
-                score_crit = {
-                    "title_keywords": prefs2.get("title_keywords", ["backend", "developer", "engineer"]),
-                    "required_skills": prefs2.get("skills", []),
-                    "remote_only": prefs2.get("remote_only", True),
-                    "max_yoe": prefs2.get("max_yoe", 5),
-                }
-                score_result = score_all_jobs(db=db, criteria=score_crit, use_ai=bool(gemini_key and use_ai), max_jobs=500)
-                all_stats["score"] = score_result
-                if run_id:
-                    add_stage_result(run_id, "score", "success", score_result)
-
-            progress.progress(1.0)
+            run_stats = run_pipeline(
+                db=db,
+                stages=selected_stages,
+                config=cfg,
+                triggered_by="manual",
+            )
+            progress_bar.progress(1.0)
             status_el.write("**Pipeline complete!**")
-
-            if run_id:
-                total_new = all_stats.get("scrape", {}).get("total_new", 0)
-                scored = all_stats.get("score", {}).get("scored", 0)
-                complete_run(run_id, status="success", stats=all_stats)
-
-            # Show summary
-            st.success("Pipeline finished!")
-            for stage, stats in all_stats.items():
-                st.write(f"**{stage.capitalize()}:** {stats}")
-
+            st.success(f"Done! Status: {run_stats.get('_status', 'unknown')}")
+            for stage, stats in run_stats.items():
+                if not stage.startswith("_"):
+                    st.write(f"**{stage}:** {stats}")
         except Exception as e:
             status_el.write(f"**Error:** {e}")
-            if run_id:
-                from job_scout.db.repositories.pipeline_runs import complete_run
-                complete_run(run_id, status="failed", error_log=str(e))
             st.error(f"Pipeline error: {e}")
             import traceback; st.code(traceback.format_exc())
 
