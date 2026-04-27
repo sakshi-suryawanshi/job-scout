@@ -32,11 +32,150 @@ try:
 except ImportError:
     serper_available = False
 
-# ========== TABS ==========
-tab1, tab2, tab3 = st.tabs(["🔎 Serper Dorking", "📊 Signal Dashboard", "⚙️ Query Builder"])
+# Import daily discovery helpers
+try:
+    from serper_dorking import parse_serper_result_as_job, CATEGORY_COOLDOWNS
+    daily_available = serper_available
+except ImportError:
+    daily_available = False
 
-# ========== TAB 1: SERPER DORKING ==========
+# ========== TABS ==========
+tab1, tab2, tab3, tab4 = st.tabs(["⚡ Daily Discovery", "🔎 Serper Dorking", "📊 Signal Dashboard", "⚙️ Query Builder"])
+
+# ========== TAB 0: DAILY DISCOVERY ==========
 with tab1:
+    st.subheader("⚡ LinkedIn + Indeed Daily Discovery")
+    st.markdown(
+        "Pulls fresh job listings from LinkedIn and Indeed via Google dorking. "
+        "Uses ~20 Serper credits/run (10 LinkedIn + 10 Indeed). Cooldown: **1 day**."
+    )
+
+    if not daily_available:
+        st.warning("SERPER_API_KEY not set. Add it to your .env or Streamlit secrets.")
+    else:
+        # Budget gauge
+        try:
+            from serper_dorking import get_serper_usage, is_category_on_cooldown
+            s_usage = get_serper_usage()
+            pct = s_usage["calls_this_month"] / s_usage["limit"]
+            bar_col, info_col = st.columns([2, 1])
+            with bar_col:
+                st.progress(min(pct, 1.0), text=f"Serper quota: {s_usage['calls_this_month']}/{s_usage['limit']} used this month")
+            with info_col:
+                st.metric("Remaining", s_usage["remaining"])
+
+            # Cooldown status
+            li_cd, li_days = is_category_on_cooldown("linkedin_daily")
+            in_cd, in_days = is_category_on_cooldown("indeed_daily")
+
+            cd_col1, cd_col2 = st.columns(2)
+            with cd_col1:
+                if li_cd:
+                    st.warning(f"LinkedIn: on cooldown (ran {li_days}d ago)")
+                else:
+                    st.success("LinkedIn: ready to run")
+            with cd_col2:
+                if in_cd:
+                    st.warning(f"Indeed: on cooldown (ran {in_days}d ago)")
+                else:
+                    st.success("Indeed: ready to run")
+        except Exception:
+            pass
+
+        st.divider()
+
+        d_col1, d_col2, d_col3 = st.columns(3)
+        with d_col1:
+            run_linkedin = st.checkbox("Run LinkedIn daily", value=True)
+        with d_col2:
+            run_indeed = st.checkbox("Run Indeed daily", value=True)
+        with d_col3:
+            force_daily = st.checkbox("Force re-run (ignore cooldown)", value=False)
+
+        results_per_q = st.slider("Results per query", 5, 20, 10, key="daily_results")
+        daily_cats = (["linkedin_daily"] if run_linkedin else []) + (["indeed_daily"] if run_indeed else [])
+        est_credits = len(daily_cats) * 10
+        st.caption(f"Estimated credits: {est_credits} (10 queries × {len(daily_cats)} source(s))")
+
+        if st.button("⚡ Run Daily Discovery", type="primary", use_container_width=True, disabled=not daily_cats):
+            from serper_dorking import SerperDorker, _build_dork_queries
+
+            dorker = SerperDorker()
+            progress = st.progress(0)
+            status = st.empty()
+            all_jobs = []
+            total = len(daily_cats)
+
+            live_queries = _build_dork_queries()
+
+            for i, cat in enumerate(daily_cats):
+                on_cd, days_ago = is_category_on_cooldown(cat)
+                if on_cd and not force_daily:
+                    status.write(f"⏭ Skipping {cat} — on cooldown ({days_ago}d ago)")
+                    continue
+
+                queries = live_queries.get(cat, [])
+                status.write(f"🔍 Searching **{cat}**... (10 queries)")
+                cat_jobs = []
+                for q_str, src_cat in queries:
+                    results = dorker.search(q_str, num_results=results_per_q)
+                    for r in results:
+                        job = parse_serper_result_as_job(r, cat)
+                        if job:
+                            cat_jobs.append(job)
+
+                from serper_dorking import _record_serper_calls
+                _record_serper_calls(len(queries), cat)
+                all_jobs.extend(cat_jobs)
+                progress.progress((i + 1) / total)
+
+            progress.progress(1.0)
+            status.write(f"✅ Done! Found {len(all_jobs)} job candidates ({dorker.queries_used} queries used)")
+
+            if all_jobs:
+                # Deduplicate by fingerprint
+                seen_fp = set()
+                unique_jobs = []
+                for j in all_jobs:
+                    fp = j.get("fingerprint", "")
+                    if fp and fp not in seen_fp:
+                        seen_fp.add(fp)
+                        unique_jobs.append(j)
+
+                st.subheader(f"{len(unique_jobs)} unique jobs found")
+
+                import pandas as pd
+                df = pd.DataFrame([{
+                    "Title": j["title"],
+                    "Company": j["company"],
+                    "Source": j["source"],
+                    "Salary": f"${j['salary_min']//1000}k-${j['salary_max']//1000}k" if j.get("salary_min") else "—",
+                    "URL": j["url"][:60],
+                } for j in unique_jobs])
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                st.divider()
+                if st.button(f"💾 Import {len(unique_jobs)} jobs to database", type="primary", use_container_width=True, key="import_daily"):
+                    with st.spinner("Importing..."):
+                        inserted = 0
+                        skipped = 0
+                        for job in unique_jobs:
+                            try:
+                                result = db.upsert_job(job)
+                                if result:
+                                    inserted += 1
+                                else:
+                                    skipped += 1
+                            except Exception:
+                                skipped += 1
+                        st.success(f"✅ Imported {inserted} new jobs! ({skipped} duplicates skipped)")
+                        if inserted:
+                            st.balloons()
+            else:
+                st.info("No jobs found. Either on cooldown or quota exhausted.")
+
+# ========== TAB 1 (was TAB 1): SERPER DORKING ==========
+with tab2:
     if not serper_available:
         st.warning("SERPER_API_KEY not set. Add it to your .env file to enable Google dorking.")
         st.code("# Add to your .env file:\nSERPER_API_KEY=your_key_here", language="bash")
@@ -230,7 +369,7 @@ with tab1:
 
 
 # ========== TAB 2: SIGNAL DASHBOARD ==========
-with tab2:
+with tab3:
     st.subheader("Signal Dashboard")
 
     # Fetch signals
@@ -284,7 +423,7 @@ with tab2:
 
 
 # ========== TAB 3: QUERY BUILDER ==========
-with tab3:
+with tab4:
     st.subheader("Custom Query Builder")
     st.markdown("Build and test custom Google dork queries for specific targets.")
 

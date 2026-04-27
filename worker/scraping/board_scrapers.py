@@ -20,12 +20,22 @@ from datetime import datetime, date
 
 _BOARDS_CONFIG_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    ".streamlit", "boards_config.json",
+    "data", "boards_config.json",
 )
 
 
+# Boards that are on by default (matches default_on=True in 6_Boards.py ALL_BOARDS)
+_DEFAULT_BOARDS = {
+    "remoteok", "remotive", "weworkremotely", "himalayas", "arbeitnow", "themuse",
+    "justjoin", "hackernews", "hackernews_jobs", "jobicy", "jobicy_all",
+    "workingnomads", "jobspresso", "wfhio", "remoteco", "authenticjobs", "nodesk",
+    "4dayweek", "dynamitejobs", "freshremote", "remotefirstjobs", "devitjobs",
+    "djangojobs", "golangjobs", "cord", "wellfound", "hired", "talentio", "pallet",
+}
+
+
 def _get_enabled_boards(all_keys: list) -> list:
-    """Return board keys filtered by boards_config.json. Falls back to all keys."""
+    """Return board keys filtered by boards_config.json. Falls back to default_on boards."""
     try:
         with open(_BOARDS_CONFIG_FILE) as f:
             cfg = json.load(f)
@@ -34,7 +44,8 @@ def _get_enabled_boards(all_keys: list) -> list:
             return [k for k in enabled if k in all_keys]
     except Exception:
         pass
-    return all_keys
+    # No config yet — return only default-on boards
+    return [k for k in all_keys if k in _DEFAULT_BOARDS]
 
 
 # ---------------------------------------------------------------------------

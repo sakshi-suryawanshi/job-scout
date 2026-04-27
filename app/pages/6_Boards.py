@@ -9,8 +9,8 @@ st.markdown("Enable or disable job boards. Disabled boards are skipped during sc
 
 # ── Config file (volume-mounted so persists across rebuilds) ─────────────────
 _CONFIG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    ".streamlit", "boards_config.json",
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "data", "boards_config.json",
 )
 
 # ── Master board registry ─────────────────────────────────────────────────────

@@ -31,6 +31,12 @@ _SERPER_USAGE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirnam
 
 _COOLDOWN_DAYS = 7  # Don't re-run same category within 7 days
 
+# Per-category cooldown overrides (days). Missing keys fall back to _COOLDOWN_DAYS.
+CATEGORY_COOLDOWNS = {
+    "linkedin_daily": 1,
+    "indeed_daily": 1,
+}
+
 
 def _load_serper_usage() -> dict:
     try:
@@ -84,8 +90,9 @@ def is_category_on_cooldown(category: str) -> tuple:
     if not last_run:
         return False, None
     try:
+        cooldown = CATEGORY_COOLDOWNS.get(category, _COOLDOWN_DAYS)
         days_ago = (date.today() - date.fromisoformat(last_run)).days
-        return days_ago < _COOLDOWN_DAYS, days_ago
+        return days_ago < cooldown, days_ago
     except Exception:
         return False, None
 
@@ -208,6 +215,31 @@ def _build_dork_queries() -> dict:
             ('site:hired.com "remote" "software engineer" "backend" salary', "hired"),
             ('"salary" "$40k" OR "$50k" OR "$60k" "remote" "engineer" "startup" -linkedin -glassdoor -indeed', "salary"),
             ('site:wellfound.com "compensation" "$40k" OR "$50k" OR "$60k" "remote" "engineer"', "wellfound"),
+        ],
+        # ── Daily discovery categories (1-day cooldown) ──────────────────────
+        "linkedin_daily": [
+            ('site:linkedin.com/jobs "remote" "backend engineer" "startup" apply', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "software engineer" "1-50 employees" python', "linkedin"),
+            ('site:linkedin.com/jobs "fully remote" "full stack" "seed" OR "series a"', "linkedin"),
+            ('site:linkedin.com/jobs "worldwide" "backend developer" "startup" "apply now"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "python developer" "11-50 employees"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "golang" OR "go developer" "startup"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "node.js" OR "nodejs" "startup" "backend"', "linkedin"),
+            ('site:linkedin.com/jobs "remote" "django" OR "fastapi" "backend" "startup"', "linkedin"),
+            ('site:linkedin.com/jobs "worldwide" "software engineer" "seed" salary', "linkedin"),
+            ('site:linkedin.com/jobs "global remote" "backend" "startup" "engineer"', "linkedin"),
+        ],
+        "indeed_daily": [
+            ('site:indeed.com "remote" "backend engineer" "$40,000" OR "$50,000" OR "$60,000"', "indeed"),
+            ('site:indeed.com "fully remote" "software engineer" "startup" python', "indeed"),
+            ('site:indeed.com "remote" "full stack developer" salary "$40" OR "$50" OR "$60"', "indeed"),
+            ('site:indeed.com "worldwide" "backend developer" "startup" apply', "indeed"),
+            ('site:indeed.com "remote" "python developer" "1-50 employees" startup', "indeed"),
+            ('site:indeed.com "globally remote" "engineer" "startup" salary', "indeed"),
+            ('site:indeed.com "remote" "golang" "startup" "backend"', "indeed"),
+            ('site:indeed.com "remote" "node.js" "backend engineer" "startup"', "indeed"),
+            ('site:indeed.com "remote" "django" OR "fastapi" developer startup', "indeed"),
+            ('site:indeed.com "global remote" "software engineer" "seed" OR "series a"', "indeed"),
         ],
     }
 
@@ -477,6 +509,7 @@ class SerperDorker:
             "jobicy": 6,
             "twitter": 8,
             "linkedin": 8,
+            "indeed": 7,
             "pallet": 9,
             "cord": 8,
             "salary": 9,
@@ -586,6 +619,85 @@ def fetch_serper_companies(
         max_queries_per_category=max_queries_per_category,
         results_per_query=results_per_query,
     )
+
+
+def parse_serper_result_as_job(result: Dict, source_category: str) -> Optional[Dict]:
+    """
+    Convert a raw Serper organic result directly into a job dict
+    (not a company dict). Used by linkedin_daily / indeed_daily flows
+    to import job records rather than company records.
+    """
+    url = result.get("link", "")
+    title = result.get("title", "")
+    snippet = result.get("snippet", "")
+
+    if not url or not title:
+        return None
+
+    # Extract company name from title patterns:
+    # "Job Title at Company | LinkedIn"
+    # "Job Title - Company | Indeed"
+    company_name = None
+    for pat in [
+        r"\bat\s+(.+?)\s*\|",
+        r"\bat\s+(.+?)\s*[-–]",
+        r"[-–]\s*(.+?)\s*\|",
+        r"\bat\s+(.+?)$",
+    ]:
+        m = re.search(pat, title, re.IGNORECASE)
+        if m:
+            cname = m.group(1).strip()
+            # Skip if it looks like a job board name
+            if cname.lower() not in {"linkedin", "indeed", "glassdoor", "monster", "ziprecruiter"}:
+                company_name = cname
+                break
+
+    if not company_name:
+        company_name = "Unknown"
+
+    # Extract job title (everything before " at " or " - Company")
+    job_title = title
+    for pat in [r"^(.+?)\s+(?:at\s+|[-–]\s*).+\|", r"^(.+?)\s+(?:at\s+|[-–]\s*).+"]:
+        m = re.search(pat, title, re.IGNORECASE)
+        if m:
+            job_title = m.group(1).strip()
+            break
+
+    # Try to extract salary from snippet
+    salary_min = salary_max = None
+    salary_match = re.search(
+        r"\$(\d{2,3})[kK]?\s*[-–to]+\s*\$?(\d{2,3})[kK]?", snippet
+    )
+    if salary_match:
+        lo, hi = int(salary_match.group(1)), int(salary_match.group(2))
+        # Treat raw numbers <300 as thousands
+        salary_min = lo * 1000 if lo < 300 else lo
+        salary_max = hi * 1000 if hi < 300 else hi
+
+    import hashlib, json as _json
+    fingerprint = hashlib.sha256(
+        _json.dumps({"title": job_title, "company": company_name, "url": url}, sort_keys=True).encode()
+    ).hexdigest()
+
+    source = "linkedin_serper" if "linkedin.com" in url else "indeed_serper"
+
+    return {
+        "title": job_title,
+        "company": company_name,
+        "url": url,
+        "description": snippet,
+        "source": source,
+        "is_remote": True,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "fingerprint": fingerprint,
+        "raw_data": {
+            "serper_url": url,
+            "serper_title": title,
+            "serper_snippet": snippet,
+            "discovery_category": source_category,
+        },
+    }
 
 
 def create_signal_from_result(company: Dict, dorker_category: str) -> Dict:
