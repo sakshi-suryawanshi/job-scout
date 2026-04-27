@@ -237,59 +237,54 @@ def stage_score(db, config: Dict = None) -> Dict:
 
 def stage_auto_apply(db, config: Dict = None) -> Dict:
     """
-    Placeholder for auto-apply (Phase 6 of V2_PLAN.md).
-    Evaluates rules and tags jobs, but does not submit forms yet.
-    Returns: {evaluated, would_apply, needs_attention, skipped}
+    Auto-apply using Playwright for Tier 1 ATS (Greenhouse/Lever/Ashby),
+    semi-auto for everything else.
+    Returns: {evaluated, applied, needs_attention, failed, skipped}
     """
     config = config or {}
-    stats = {"evaluated": 0, "would_apply": 0, "needs_attention": 0, "skipped": 0}
+    stats = {"evaluated": 0, "applied": 0, "needs_attention": 0, "failed": 0, "skipped": 0}
+
+    # Require APPLY_EMAIL to be set — hard gate
+    if not os.getenv("APPLY_EMAIL"):
+        print("  AUTO-APPLY skipped: APPLY_EMAIL not set in environment")
+        return stats
+
+    # Load the resume from DB user_profile
+    resume_text = ""
+    try:
+        result = db._request("GET", "user_profile", params={"limit": 1})
+        resume_text = (result[0].get("resume_text", "") or "") if result else ""
+    except Exception:
+        pass
+
+    if not resume_text.strip():
+        print("  AUTO-APPLY skipped: no resume in profile (Profile → Resume)")
+        return stats
 
     try:
-        from job_scout.pipeline.rules_engine import load_rules, find_matching_rule
-        rules = load_rules(db)
-        if not rules:
-            print("  No auto-apply rules configured — skipping")
-            return stats
+        from job_scout.application.orchestrator import run_auto_apply_batch
 
-        # Get unactioned recommended jobs
+        # Get unactioned high-score jobs
         all_jobs = db.get_jobs(limit=500, days=config.get("days", 30))
         candidates = [
             j for j in all_jobs
             if not j.get("user_action")
-            and (j.get("match_score", 0) or 0) >= 70
+            and (j.get("match_score", 0) or 0) >= config.get("min_score_for_apply", 70)
         ]
 
-        daily_cap = config.get("daily_auto_apply_cap", 50)
-        applied_today = 0
-
-        for job in candidates:
-            if applied_today >= daily_cap:
-                stats["skipped"] += len(candidates) - stats["evaluated"]
-                break
-
-            stats["evaluated"] += 1
-            matching_rule = find_matching_rule(job, rules)
-            if matching_rule:
-                action = (matching_rule.get("action") or {})
-                if action.get("type") == "auto_apply":
-                    ats_type = job.get("companies", {}).get("ats_type", "unknown") if isinstance(job.get("companies"), dict) else "unknown"
-                    if ats_type in ("greenhouse", "lever", "ashby"):
-                        # Phase 6 would fire the Playwright applier here.
-                        # For now: tag as 'queued_for_auto_apply' so Auto-Pilot UI shows it.
-                        try:
-                            db._request("PATCH", f"jobs?id=eq.{job['id']}", json={
-                                "user_action": "queued_auto_apply"
-                            })
-                        except Exception:
-                            pass
-                        stats["would_apply"] += 1
-                        applied_today += 1
-                    else:
-                        stats["needs_attention"] += 1
+        result = run_auto_apply_batch(
+            db=db,
+            jobs=candidates,
+            resume_text=resume_text,
+            daily_cap=config.get("daily_auto_apply_cap", 50),
+            headless=config.get("headless", True),
+        )
+        stats.update(result)
     except Exception as e:
         print(f"  auto-apply stage error: {e}")
+        import traceback; traceback.print_exc()
 
-    print(f"Stage 6 AUTO-APPLY (dry run): {stats}")
+    print(f"Stage 6 AUTO-APPLY: {stats}")
     return stats
 
 

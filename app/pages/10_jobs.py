@@ -144,8 +144,8 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
 # ── Page ─────────────────────────────────────────────────────────────────────
 st.title("💼 Jobs")
 
-tab_queue, tab_all, tab_saved, tab_applied, tab_followups = st.tabs([
-    "🚀 Apply Queue", "📋 All Jobs", "💾 Saved", "✅ Applied", "🔔 Follow-Ups"
+tab_queue, tab_all, tab_saved, tab_applied, tab_followups, tab_attention = st.tabs([
+    "🚀 Apply Queue", "📋 All Jobs", "💾 Saved", "✅ Applied", "🔔 Follow-Ups", "⚠️ Needs Attention"
 ])
 
 
@@ -339,3 +339,54 @@ with tab_followups:
                             db.mark_job_action(jid, "rejected"); st.rerun()
     else:
         st.success("No follow-ups due right now!")
+
+
+# ── Tab: Needs Attention ──────────────────────────────────────────────────────
+with tab_attention:
+    st.subheader("⚠️ Needs Attention")
+    st.caption("Jobs the pipeline couldn't auto-apply to — Tier 2 semi-auto with pre-filled values.")
+
+    try:
+        attention_jobs = [j for j in db.get_jobs(limit=5000, days=0)
+                         if j.get("user_action") == "needs_attention"]
+    except Exception:
+        attention_jobs = []
+
+    if not attention_jobs:
+        st.info("Nothing needs attention. The pipeline will populate this when it finds non-Greenhouse/Lever/Ashby jobs that match your rules.")
+    else:
+        st.write(f"**{len(attention_jobs)} jobs** need a quick manual apply (~20 seconds each)")
+
+        for job in attention_jobs:
+            company_info = job.get("companies", {}) or {}
+            company_name = company_info.get("name", "Unknown")
+            ats = (company_info.get("ats_type") or "unknown")
+
+            with st.expander(f"**{job.get('title', 'Untitled')}** — {company_name} | ATS: {ats}"):
+                left, right = st.columns([3, 1])
+
+                with left:
+                    if job.get("apply_url"):
+                        st.markdown(f"[🔗 Open Application Page]({job['apply_url']})")
+                    st.caption("Pre-filled values to copy-paste into the form:")
+
+                    # Show pre-filled values from applications table if available
+                    try:
+                        app_record = db._request("GET", "applications", params={
+                            "job_id": f"eq.{job['id']}", "limit": 1
+                        })
+                        if app_record:
+                            cover_letter = app_record[0].get("cover_letter", "")
+                            if cover_letter:
+                                st.text_area("Cover Letter (copy ↓)", value=cover_letter,
+                                             height=200, key=f"cl_attn_{job['id']}")
+                    except Exception:
+                        pass
+
+                with right:
+                    jid = job.get("id")
+                    if jid:
+                        if st.button("✅ Mark Applied", key=f"ma_{jid}", use_container_width=True, type="primary"):
+                            db.mark_job_applied(jid); st.rerun()
+                        if st.button("❌ Skip", key=f"sa_{jid}", use_container_width=True):
+                            db.mark_job_action(jid, "rejected"); st.rerun()
