@@ -1,6 +1,10 @@
 services:
+
+  # ── Streamlit UI ────────────────────────────────────────────────────────────
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     env_file:
@@ -9,3 +13,31 @@ services:
       - ./.streamlit:/app/.streamlit:rw
       - ./data:/app/data
     restart: unless-stopped
+
+  # ── Daily pipeline scheduler ────────────────────────────────────────────────
+  # Runs `python -m job_scout.pipeline.scheduler` which fires the pipeline daily
+  # at the time configured in data/schedule_config.json (default: 07:00 local).
+  #
+  # To run once immediately:
+  #   docker compose run --rm pipeline --now
+  #
+  # To disable: set enabled=false in data/schedule_config.json via the UI,
+  # or comment out this service.
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/pipeline.Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data          # shares schedule_config.json + screenshots
+      - ./.streamlit:/app/.streamlit:rw  # shares quota tracking files
+    restart: unless-stopped
+    # Playwright needs a writable /tmp for Chromium
+    tmpfs:
+      - /tmp
+    # Cap CPU/RAM so a runaway scrape doesn't starve the UI
+    deploy:
+      resources:
+        limits:
+          memory: 1g

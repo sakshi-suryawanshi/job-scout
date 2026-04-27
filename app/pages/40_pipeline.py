@@ -34,7 +34,132 @@ def load_rules():
 st.title("🤖 Auto-Pilot")
 st.caption("Configure and monitor the automated daily pipeline.")
 
-tab_run, tab_rules, tab_history = st.tabs(["▶ Run Now", "📋 Auto-Apply Rules", "📜 History"])
+tab_schedule, tab_run, tab_rules, tab_history = st.tabs(["🕐 Schedule", "▶ Run Now", "📋 Auto-Apply Rules", "📜 History"])
+
+
+# ── Tab: Schedule ────────────────────────────────────────────────────────────
+with tab_schedule:
+    import json, os
+    from pathlib import Path
+
+    _CFG_FILE = Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "data" / "schedule_config.json"
+
+    def _load_cfg():
+        try:
+            with open(_CFG_FILE) as f:
+                return json.load(f)
+        except Exception:
+            return {"enabled": True, "run_time": "07:00", "stages": list(range(1, 9)),
+                    "digest_email": "", "daily_auto_apply_cap": 50}
+
+    def _save_cfg(cfg):
+        _CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_CFG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
+
+    cfg = _load_cfg()
+
+    st.subheader("Daily Pipeline Schedule")
+    st.caption("Changes saved here are picked up by the scheduler on its next tick (≤30 seconds).")
+
+    # Status card
+    from datetime import datetime, timedelta
+    runs = load_runs(5)
+    last_run = runs[0] if runs else None
+
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        status_label = "✅ Enabled" if cfg.get("enabled") else "⏸️ Paused"
+        st.metric("Scheduler", status_label)
+    with sc2:
+        st.metric("Daily run time", cfg.get("run_time", "07:00"))
+    with sc3:
+        if last_run:
+            started = str(last_run.get("started_at", ""))[:16]
+            st.metric("Last run", started)
+        else:
+            st.metric("Last run", "Never")
+
+    # Next run time
+    run_time = cfg.get("run_time", "07:00")
+    try:
+        h, m = [int(x) for x in run_time.split(":")]
+        now = datetime.now()
+        candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        delta = candidate - now
+        hours_away = int(delta.total_seconds() // 3600)
+        mins_away  = int((delta.total_seconds() % 3600) // 60)
+        st.info(f"⏰ Next scheduled run: **{candidate.strftime('%Y-%m-%d %H:%M')}** (in {hours_away}h {mins_away}m)")
+    except Exception:
+        pass
+
+    st.divider()
+
+    # Config form
+    with st.form("schedule_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            new_enabled = st.checkbox("Scheduler enabled", value=cfg.get("enabled", True))
+            new_time = st.text_input("Run time (HH:MM local)", value=cfg.get("run_time", "07:00"),
+                                      help="24-hour format. Matches the time zone of the machine running the scheduler.")
+            new_email = st.text_input("Digest email recipient",
+                                       value=cfg.get("digest_email", "") or os.getenv("DIGEST_EMAIL", ""),
+                                       placeholder="you@gmail.com")
+        with c2:
+            new_cap = st.slider("Max auto-apply per day", 0, 50, cfg.get("daily_auto_apply_cap", 50))
+            all_stages = {
+                1: "Discover companies",
+                2: "Scrape jobs",
+                3: "Enrich (desperation)",
+                4: "Classify",
+                5: "Score",
+                6: "Auto-apply",
+                7: "Follow-ups",
+                8: "Email digest",
+            }
+            enabled_stages = cfg.get("stages", list(range(1, 9)))
+            selected = st.multiselect(
+                "Stages to run",
+                options=list(all_stages.keys()),
+                default=enabled_stages,
+                format_func=lambda n: f"Stage {n}: {all_stages[n]}",
+            )
+
+        if st.form_submit_button("💾 Save Schedule", type="primary", use_container_width=True):
+            # Validate time format
+            try:
+                h2, m2 = [int(x) for x in new_time.split(":")]
+                assert 0 <= h2 <= 23 and 0 <= m2 <= 59
+            except Exception:
+                st.error("Invalid time format — use HH:MM (e.g. 07:00)")
+                st.stop()
+
+            new_cfg = {
+                "enabled": new_enabled,
+                "run_time": new_time,
+                "stages": sorted(selected),
+                "digest_email": new_email,
+                "daily_auto_apply_cap": new_cap,
+                "headless": True,
+                "max_slugs_per_ats": 100,
+            }
+            _save_cfg(new_cfg)
+            st.success("Schedule saved! The scheduler will pick this up within 30 seconds.")
+            st.rerun()
+
+    st.divider()
+    st.write("**How to start the scheduler:**")
+    st.code("""# Option A — Docker Compose (recommended)
+docker compose up pipeline -d
+
+# Option B — direct Python (for local dev / VPS cron)
+python -m job_scout.pipeline.scheduler
+
+# Option C — one-shot via cron (add to crontab -e)
+0 7 * * * /path/to/job_scout/scripts/run_pipeline.sh >> ~/job_scout.log 2>&1
+""", language="bash")
 
 
 # ── Tab: Run Now ──────────────────────────────────────────────────────────────
