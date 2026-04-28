@@ -5,6 +5,10 @@
 [![CI](https://github.com/sakshi-suryawanshi/job-scout/actions/workflows/ci.yml/badge.svg)](https://github.com/sakshi-suryawanshi/job-scout/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![Free tier only](https://img.shields.io/badge/cost-$0%2Fmonth-green.svg)](#free-tier-limits)
+[![v2.0.0](https://img.shields.io/badge/version-v2.0.0-blue.svg)](https://github.com/sakshi-suryawanshi/job-scout/releases/tag/v2.0.0)
+
+> **Live demo:** Deploy your own in 5 minutes — see [Quick start](#quick-start).
+> To run with demo data (no real API keys): set `DEMO_MODE=true` in your `.env`.
 
 ---
 
