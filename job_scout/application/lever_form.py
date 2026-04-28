@@ -107,7 +107,11 @@ def apply_lever(
 
             # ── Confirm ─────────────────────────────────────────────────────
             try:
-                page.wait_for_selector("text=Thank you, text=submitted, text=received", timeout=10_000)
+                page.locator("text=Thank you").or_(
+                    page.locator("text=submitted")
+                ).or_(
+                    page.locator("text=received")
+                ).wait_for(timeout=10_000)
                 ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = os.path.join(screenshots_dir(), f"lever_{ts2}_success.png")
                 page.screenshot(path=screenshot_path, full_page=False)

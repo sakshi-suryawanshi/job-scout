@@ -126,10 +126,11 @@ def apply_greenhouse(
 
             # ── Confirm success ─────────────────────────────────────────────
             try:
-                page.wait_for_selector(
-                    "text=application has been submitted, text=Thank you, text=successfully submitted",
-                    timeout=10_000,
-                )
+                page.locator("text=application has been submitted").or_(
+                    page.locator("text=Thank you")
+                ).or_(
+                    page.locator("text=successfully submitted")
+                ).wait_for(timeout=10_000)
                 ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = os.path.join(screenshots_dir(), f"greenhouse_{ts2}_success.png")
                 page.screenshot(path=screenshot_path, full_page=False)

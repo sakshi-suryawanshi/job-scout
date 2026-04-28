@@ -27,12 +27,23 @@ def send_email(
 
     Returns True on success, False on failure.
     """
-    gmail_user = from_addr or os.getenv("GMAIL_USER", "")
-    gmail_pass = smtp_password or os.getenv("GMAIL_APP_PASS", "")
+    # Support both Gmail-specific and generic SMTP env var names
+    gmail_user = from_addr or os.getenv("GMAIL_USER") or os.getenv("SMTP_USER", "")
+    gmail_pass = smtp_password or os.getenv("GMAIL_APP_PASS") or os.getenv("SMTP_PASSWORD", "")
 
     if not gmail_user or not gmail_pass:
         print("email: GMAIL_USER or GMAIL_APP_PASS not set — skipping send")
         return False
+
+    # Enforce daily cap before sending
+    try:
+        from job_scout.db.repositories.usage import get_usage_today
+        usage = get_usage_today("gmail")
+        if usage["calls"] >= _DAILY_HARD_CAP:
+            print(f"email: daily cap of {_DAILY_HARD_CAP} reached ({usage['calls']} sent today) — skipping")
+            return False
+    except Exception:
+        pass  # Never block a send because quota check failed
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -45,6 +56,11 @@ def send_email(
             server.login(gmail_user, gmail_pass)
             server.sendmail(gmail_user, [to], msg.as_string())
         print(f"email: sent '{subject}' to {to}")
+        try:
+            from job_scout.db.repositories.usage import record_usage
+            record_usage("gmail", 1)
+        except Exception:
+            pass
         return True
     except smtplib.SMTPAuthenticationError:
         print("email: authentication failed — check GMAIL_USER and GMAIL_APP_PASS")

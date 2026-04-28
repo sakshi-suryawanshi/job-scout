@@ -31,23 +31,29 @@ def prepare_manual_apply(
     company_info = job.get("companies", {}) or {}
     company_name = company_info.get("name", "") or job.get("company_name", "Unknown")
 
-    # Generate cover letter with Gemini if available
+    # Tailor resume + generate cover letter with Gemini if available
+    tailored_text = ""
     cover_letter = ""
     gemini_key = os.getenv("GEMINI_API_KEY", "")
     if gemini_key and resume_text:
         try:
             from job_scout.ai.gemini import GeminiClient, tailor_resume
             gemini = GeminiClient(gemini_key)
+            tailored_text = tailor_resume(gemini, resume_text, job) or resume_text
             cover_letter = _generate_cover_letter(gemini, job, resume_text)
         except Exception as e:
-            print(f"cover letter generation error: {e}")
+            print(f"Gemini prepare error: {e}")
+            tailored_text = resume_text
 
     return ApplyResult(
         status="needs_attention",
         tier=2,
         apply_url=job.get("apply_url", ""),
         cover_letter=cover_letter,
-        notes=f"Semi-auto: pre-filled values ready for {company_name}. Open URL and paste.",
+        notes=(
+            f"Semi-auto: tailored resume + cover letter ready for {company_name}. "
+            "Open URL, paste values, and click Submit (~20s)."
+        ),
     )
 
 

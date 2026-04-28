@@ -111,12 +111,11 @@ def apply_ashby(
 
             # ── Confirm ─────────────────────────────────────────────────────
             try:
-                page.wait_for_selector(
-                    "text=application has been submitted, "
-                    "text=Thank you for applying, "
-                    "text=successfully submitted",
-                    timeout=12_000,
-                )
+                page.locator("text=application has been submitted").or_(
+                    page.locator("text=Thank you for applying")
+                ).or_(
+                    page.locator("text=successfully submitted")
+                ).wait_for(timeout=12_000)
                 ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = os.path.join(screenshots_dir(), f"ashby_{ts2}_success.png")
                 page.screenshot(path=screenshot_path, full_page=False)
@@ -152,10 +151,6 @@ def _fill_labeled(page, label: str, value: str):
     try:
         el = page.get_by_label(label, exact=False)
         if el.count() > 0:
-            tag = el.first.evaluate("el => el.tagName.toLowerCase()")
-            if tag == "textarea":
-                el.first.fill(value)
-            else:
-                el.first.fill(value)
+            el.first.fill(value)
     except Exception:
         pass

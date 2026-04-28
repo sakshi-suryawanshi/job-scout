@@ -88,10 +88,10 @@ with tab_scrape:
 
     with sc1:
         st.caption("**ATS Boards**")
-        ats_gh  = st.checkbox("Greenhouse (~80 cos)", value=True)
-        ats_lv  = st.checkbox("Lever (~15 cos)", value=True)
-        ats_ash = st.checkbox("Ashby (~60 cos)", value=True)
-        max_slugs = st.slider("Max companies per ATS", 10, 200, 50)
+        ats_gh  = st.checkbox("Greenhouse (~80 cos)", value=True,  key="sc_ats_gh")
+        ats_lv  = st.checkbox("Lever (~15 cos)",      value=True,  key="sc_ats_lv")
+        ats_ash = st.checkbox("Ashby (~60 cos)",      value=True,  key="sc_ats_ash")
+        max_slugs = st.slider("Max companies per ATS", 10, 200, 50, key="sc_max_slugs")
 
     with sc2:
         st.caption("**Job Boards**")
@@ -230,12 +230,11 @@ with tab_daily:
         cats = (["linkedin_daily"] if run_li else []) + (["indeed_daily"] if run_in else [])
 
         if st.button("⚡ Run Daily Discovery", type="primary", use_container_width=True, disabled=not cats):
-            from job_scout.discovery.serper_dorking import SerperDorker, parse_serper_result_as_job
-            from job_scout.enrichment.dedup import generate_job_fingerprint
-            with st.spinner("Running..."):
+            from job_scout.discovery.serper_dorking import SerperDorker
+            with st.spinner("Running…"):
                 try:
                     dorker = SerperDorker()
-                    total_companies, total_jobs = 0, 0
+                    total_companies = 0
                     for cat in cats:
                         companies_found = dorker.run_dork_category(cat, results_per_query=results_per_q, force=force_d)
                         db_companies = [dorker.to_db_format(c) for c in companies_found]
@@ -243,7 +242,11 @@ with tab_daily:
                         new_cos = [c for c in db_companies if (c.get("name") or "").lower() not in existing]
                         if new_cos:
                             total_companies += db.add_companies_bulk(new_cos)
-                    st.success(f"Found {total_companies} new companies from LinkedIn/Indeed!")
+                    st.success(
+                        f"Added **{total_companies}** new companies from LinkedIn/Indeed. "
+                        "Their job listings will be scraped automatically in the next pipeline run "
+                        "(or use the **Scrape Jobs** tab to pull them now)."
+                    )
                 except Exception as e:
                     st.error(f"Error: {e}")
                     import traceback; st.code(traceback.format_exc())

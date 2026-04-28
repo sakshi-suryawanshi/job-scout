@@ -177,6 +177,21 @@ with tab_keys:
     st.divider()
     st.caption("To set keys: add them to your `.env` file or Streamlit Cloud secrets (`Manage app → Secrets`).")
 
+    st.divider()
+    st.subheader("Demo Mode")
+    demo_active = os.getenv("DEMO_MODE", "false").lower() == "true"
+    if demo_active:
+        st.warning(
+            "🎭 **Demo mode is ON** — Gemini and Serper calls return mocked responses. "
+            "No real API quota is consumed."
+        )
+    else:
+        st.success("✅ **Demo mode is OFF** — using real API keys and live data.")
+    st.caption(
+        "Toggle by setting `DEMO_MODE=true` or `DEMO_MODE=false` in your `.env` file "
+        "or Streamlit Cloud secrets, then restart the app."
+    )
+
 
 # ── About ─────────────────────────────────────────────────────────────────────
 with tab_about:
@@ -187,13 +202,15 @@ with tab_about:
 **Stack:** Streamlit · Supabase (PostgREST) · Gemini 2.0 Flash · Serper.dev
 
 **V2 features:**
-- 40+ job boards scraped in parallel
-- ATS direct scraping (Greenhouse, Lever, Ashby)
-- Google dorking via Serper.dev (LinkedIn, Indeed, hidden gems)
-- AI job scoring + resume tailoring (Gemini)
-- Desperation signal detection
+- 40+ job boards scraped daily
+- ATS direct scraping: Greenhouse · Lever · Ashby · Workable · SmartRecruiters
+- Google dorking via Serper.dev (LinkedIn, Indeed, distress signals, funding signals)
+- AI job scoring + resume tailoring (Gemini 2.0 Flash)
+- Desperation signal detection — prioritises eager-to-hire companies
+- Auto-apply: Playwright tier 1 (full form-fill) · tier 2 (semi-auto) · tier 3 (cold email)
 - Application tracking + follow-up reminders
-- Daily automated pipeline (coming soon)
+- Daily automated pipeline with email digest (Stages 1–8)
+- Demo mode for showcase without burning API quota
 
 **Free tier only.** Zero paid services required.
 """)

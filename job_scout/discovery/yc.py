@@ -19,7 +19,7 @@ class YCScraper:
             follow_redirects=True,
         )
 
-    def fetch_from_github(self) -> List[Dict]:
+    def fetch_from_yclist(self) -> List[Dict]:
         companies = []
         try:
             response = self.client.get("https://yclist.com/api/companies")
@@ -62,7 +62,7 @@ class YCScraper:
         return companies
 
     def fetch_by_batch(self, batch: str) -> List[Dict]:
-        all_companies = self.fetch_from_github()
+        all_companies = self.fetch_from_yclist()
         filtered = [c for c in all_companies if c.get("batch") == batch]
         print(f"Filtered {len(filtered)} companies from batch {batch}")
         return filtered
@@ -105,7 +105,7 @@ class YCScraper:
 def fetch_yc_companies(batch: Optional[str] = None, limit: int = 100, enrich: bool = False) -> List[Dict]:
     """Fetch YC companies. enrich=True is a no-op placeholder for future ATS-slug enrichment."""
     scraper = YCScraper()
-    raw = scraper.fetch_by_batch(batch) if batch else scraper.fetch_from_github()
+    raw = scraper.fetch_by_batch(batch) if batch else scraper.fetch_from_yclist()
     db_companies = [scraper.to_db_format(c) for c in raw]
     valid = [c for c in db_companies if c.get("name") and c.get("career_url")]
     print(f"✅ Returning {len(valid)} valid companies (requested limit: {limit})")

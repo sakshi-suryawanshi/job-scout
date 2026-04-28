@@ -14,7 +14,9 @@ try:
 except Exception:
     pass
 
-_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+def _is_demo_mode() -> bool:
+    """Read DEMO_MODE at call time so toggling the env var takes effect without restart."""
+    return os.getenv("DEMO_MODE", "false").lower() == "true"
 
 _USAGE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -45,7 +47,7 @@ def _save_usage(data: dict):
 
 
 def get_gemini_usage_today() -> dict:
-    if _DEMO_MODE:
+    if _is_demo_mode():
         return {"calls": 42, "remaining": 1458, "limit": 1500}
     data = _load_usage()
     calls = data.get("gemini_calls", 0)
@@ -63,7 +65,7 @@ class GeminiClient:
         self.requests_made = 0
 
     def generate(self, prompt: str, max_tokens: int = 2048) -> Optional[str]:
-        if _DEMO_MODE:
+        if _is_demo_mode():
             return "Demo mode — Gemini response mocked. Set DEMO_MODE=false and add GEMINI_API_KEY to enable."
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -371,7 +373,7 @@ def score_all_jobs(db, criteria: Dict, use_ai: bool = False, max_jobs: int = 200
                 "location": j.get("location", ""),
                 "is_remote": j.get("is_remote", False),
                 "source_board": j.get("source_board", ""),
-                "description": "",
+                "description": (j.get("description") or "")[:500],
             } for j in batch]
             batch_scores = _score_batch(gemini, job_dicts, criteria)
             if batch_scores:
@@ -395,7 +397,7 @@ def score_all_jobs(db, criteria: Dict, use_ai: bool = False, max_jobs: int = 200
             total_score += result["score"]
 
     try:
-        from worker.signals.desperation_detector import compute_desperation_for_jobs
+        from job_scout.enrichment.desperation import compute_desperation_for_jobs
         all_for_desp = db.get_jobs(limit=max_jobs)
         no_desp = [j for j in all_for_desp if not j.get("desperation_score")]
         if no_desp:
@@ -415,7 +417,7 @@ def score_all_jobs(db, criteria: Dict, use_ai: bool = False, max_jobs: int = 200
 def tailor_resume(gemini: "GeminiClient", resume_text: str, job: Dict, job_description: str = "") -> Optional[str]:
     company_info = job.get("companies", {}) or {}
     company_name = company_info.get("name", "") or job.get("company_name", "Unknown")
-    description_section = f"- Description excerpt:\n{job_description[:2000]}" if job_description.strip() else ""
+    description_section = f"- Description excerpt:\n{job_description[:2000]}" if (job_description or "").strip() else ""
     prompt = TAILOR_PROMPT.format(
         job_title=job.get("title", "Unknown"),
         company_name=company_name,

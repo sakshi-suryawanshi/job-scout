@@ -193,8 +193,16 @@ def seed(clear: bool = False):
     if clear:
         print("Clearing existing demo data...")
         try:
-            db._request("DELETE", "jobs?source_board=eq.demo")
+            # Jobs don't carry a 'demo' marker directly — find them via demo company IDs
+            demo_cos = db._request("GET", "companies", params={
+                "source": "eq.demo_seed", "select": "id", "limit": 1000,
+            }) or []
+            cleared_jobs = 0
+            for co in demo_cos:
+                db._request("DELETE", f"jobs?company_id=eq.{co['id']}")
+                cleared_jobs += 1
             db._request("DELETE", "companies?source=eq.demo_seed")
+            print(f"  Cleared jobs for {cleared_jobs} demo companies and all demo_seed companies")
         except Exception as e:
             print(f"  Clear error (may be fine): {e}")
 

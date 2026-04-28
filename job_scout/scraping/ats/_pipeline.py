@@ -8,6 +8,8 @@ from typing import List, Dict
 from job_scout.scraping.ats.greenhouse import GreenhouseScraper, GREENHOUSE_SLUGS
 from job_scout.scraping.ats.lever import LeverScraper, LEVER_SLUGS
 from job_scout.scraping.ats.ashby import AshbyScraper, ASHBY_SLUGS
+from job_scout.scraping.ats.workable import WorkableScraper, WORKABLE_SLUGS
+from job_scout.scraping.ats.smartrecruiters import SmartRecruitersScraper, SMARTRECRUITERS_IDS
 from job_scout.scraping.base import to_db_job
 from job_scout.enrichment.filters import matches_criteria
 
@@ -15,9 +17,11 @@ from job_scout.enrichment.filters import matches_criteria
 def get_slugs_from_db(db, ats_type: str) -> List[str]:
     """Extract company slugs from DB career URLs for a given ATS type."""
     url_patterns = {
-        "greenhouse": r"boards\.greenhouse\.io/([^/]+)",
-        "lever": r"jobs\.lever\.co/([^/]+)",
-        "ashby": r"jobs\.ashbyhq\.com/([^/]+)",
+        "greenhouse":      r"boards\.greenhouse\.io/([^/]+)",
+        "lever":           r"jobs\.lever\.co/([^/]+)",
+        "ashby":           r"jobs\.ashbyhq\.com/([^/]+)",
+        "workable":        r"apply\.workable\.com/([^/]+)",
+        "smartrecruiters": r"jobs\.smartrecruiters\.com/([^/]+)",
     }
     pattern = url_patterns.get(ats_type)
     if not pattern:
@@ -38,9 +42,11 @@ def get_slugs_from_db(db, ats_type: str) -> List[str]:
 def get_all_slugs(db, ats_type: str) -> List[str]:
     """Merge DB slugs with hardcoded slug lists, deduplicated."""
     hardcoded = {
-        "greenhouse": GREENHOUSE_SLUGS,
-        "lever": LEVER_SLUGS,
-        "ashby": ASHBY_SLUGS,
+        "greenhouse":      GREENHOUSE_SLUGS,
+        "lever":           LEVER_SLUGS,
+        "ashby":           ASHBY_SLUGS,
+        "workable":        WORKABLE_SLUGS,
+        "smartrecruiters": SMARTRECRUITERS_IDS,
     }
     db_slugs = get_slugs_from_db(db, ats_type)
     return list(set(db_slugs + hardcoded.get(ats_type, [])))
@@ -72,9 +78,11 @@ def scrape_ats_jobs(
         criteria = _DEFAULT_CRITERIA
 
     scrapers = {
-        "greenhouse": GreenhouseScraper(),
-        "lever": LeverScraper(),
-        "ashby": AshbyScraper(),
+        "greenhouse":      GreenhouseScraper(),
+        "lever":           LeverScraper(),
+        "ashby":           AshbyScraper(),
+        "workable":        WorkableScraper(),
+        "smartrecruiters": SmartRecruitersScraper(),
     }
 
     stats = {"total_scraped": 0, "matched": 0, "saved": 0, "errors": 0, "by_ats": {}}

@@ -24,7 +24,8 @@ def record_usage(provider: str, count: int = 1) -> None:
 def get_usage_today(provider: str) -> Dict:
     """Return {calls, remaining, limit} for provider today."""
     db = get_db()
-    limits = {"gemini": 1500, "serper": 2500, "gmail": 500}
+    # Serper daily budget: 2500/month ÷ 30 days ≈ 83 queries/day
+    limits = {"gemini": 1500, "serper": 83, "gmail": 500}
     period_key = date.today().isoformat()
     try:
         result = db._request("GET", "api_usage", params={

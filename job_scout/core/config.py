@@ -54,11 +54,11 @@ def smtp_port() -> int:
 
 
 def smtp_user() -> Optional[str]:
-    return get("SMTP_USER") or get("APPLY_EMAIL")
+    return get("GMAIL_USER") or get("SMTP_USER") or get("APPLY_EMAIL")
 
 
 def smtp_password() -> Optional[str]:
-    return get("SMTP_PASSWORD")
+    return get("GMAIL_APP_PASS") or get("SMTP_PASSWORD")
 
 
 def digest_email() -> Optional[str]:

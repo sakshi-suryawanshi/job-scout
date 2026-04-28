@@ -32,7 +32,7 @@ class LeverScraper:
             data = response.json()
             if not isinstance(data, list):
                 return []
-            real_jobs = [j for j in data if "moved" not in j.get("text", "").lower() or len(data) > 2]
+            real_jobs = [j for j in data if "moved" not in j.get("text", "").lower()]
             return [self._parse_job(j, company_slug) for j in real_jobs]
         except Exception:
             return []

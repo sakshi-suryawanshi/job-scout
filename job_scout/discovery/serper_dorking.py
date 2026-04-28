@@ -18,7 +18,9 @@ except Exception:
 
 SERPER_API_URL = "https://google.serper.dev/search"
 
-_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+def _is_demo_mode() -> bool:
+    """Read DEMO_MODE at call time so toggling the env var takes effect without restart."""
+    return os.getenv("DEMO_MODE", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Usage tracking — now backed by DB via api_usage table (migration 009).
@@ -56,7 +58,7 @@ def _save_serper_usage(data: dict):
 
 
 def get_serper_usage() -> dict:
-    if _DEMO_MODE:
+    if _is_demo_mode():
         return {"calls_this_month": 78, "remaining": 2422, "limit": 2500, "cooldowns": {}}
     data = _load_serper_usage()
     month_key = date.today().strftime("%Y-%m")
@@ -248,7 +250,7 @@ class SerperDorker:
         self.queries_used = 0
 
     def search(self, query: str, num_results: int = 10) -> List[Dict]:
-        if _DEMO_MODE:
+        if _is_demo_mode():
             return []  # Return empty in demo mode — no real searches
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
         try:
