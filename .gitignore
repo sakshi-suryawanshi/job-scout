@@ -28,6 +28,9 @@ data/*.json
 *.sqlite
 *.sqlite3
 
+# Claude Code (contains MCP secrets)
+.claude/
+
 # IDE / OS
 .vscode/
 .idea/
