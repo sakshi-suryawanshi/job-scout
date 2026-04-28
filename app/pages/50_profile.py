@@ -97,8 +97,10 @@ Resume:\n{resume_text[:3000]}\n\nReturn ONLY valid JSON."""
                         "experience_years": resp.get("experience_years", 0),
                         "preferred_roles": json.dumps(resp.get("preferred_roles", [])),
                     }
-                    _save_profile(update, profile.get("id") if profile else None)
-                    st.success("Analyzed and saved!")
+                    if _save_profile(update, profile.get("id") if profile else None):
+                        st.success("Analyzed and saved!")
+                    else:
+                        st.warning("Analysis complete, but could not persist to DB — check your connection.")
                     st.write(f"**Summary:** {resp.get('summary', '')}")
                     st.write(f"**Experience:** ~{resp.get('experience_years', '?')} years")
                     skills = resp.get("skills", [])

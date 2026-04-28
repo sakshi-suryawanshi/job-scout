@@ -103,15 +103,24 @@ def _build_dork_queries() -> dict:
     yr = f"{y} OR {y + 1}"
     return {
         "ats_hiring": [
+            # Greenhouse
             ('site:boards.greenhouse.io "remote" "engineer"', "greenhouse"),
             ('site:boards.greenhouse.io "worldwide" "developer"', "greenhouse"),
             ('site:boards.greenhouse.io "backend" "startup"', "greenhouse"),
             ('site:boards.greenhouse.io "python" OR "golang" remote', "greenhouse"),
+            # Lever
             ('site:jobs.lever.co "remote" "engineer"', "lever"),
             ('site:jobs.lever.co "backend" "python" OR "go"', "lever"),
+            # Ashby
             ('site:jobs.ashbyhq.com "remote" "engineer"', "ashby"),
             ('site:jobs.ashbyhq.com "backend" OR "fullstack"', "ashby"),
             ('site:jobs.ashbyhq.com "worldwide" "developer"', "ashby"),
+            # Workable — auto-discovers new companies on this ATS
+            ('site:apply.workable.com "remote" "engineer"', "workable"),
+            ('site:apply.workable.com "backend" "python" OR "go"', "workable"),
+            # SmartRecruiters — auto-discovers new companies on this ATS
+            ('site:jobs.smartrecruiters.com "remote" "engineer"', "smartrecruiters"),
+            ('site:jobs.smartrecruiters.com "backend" "startup"', "smartrecruiters"),
         ],
         "job_boards": [
             ('site:wellfound.com "1-10 employees" "remote" "engineer"', "wellfound"),
@@ -294,6 +303,24 @@ class SerperDorker:
                     "career_url": f"https://jobs.ashbyhq.com/{slug}", "ats_type": "ashby", "job_title_hint": title}
         return None
 
+    def extract_company_from_workable(self, url, title):
+        match = re.search(r"apply\.workable\.com/([^/\?]+)", url)
+        if match:
+            slug = match.group(1)
+            return {"name": slug.replace("-", " ").replace("_", " ").title(),
+                    "career_url": f"https://apply.workable.com/{slug}", "ats_type": "workable",
+                    "job_title_hint": title}
+        return None
+
+    def extract_company_from_smartrecruiters(self, url, title):
+        match = re.search(r"jobs\.smartrecruiters\.com/([^/\?]+)", url)
+        if match:
+            company_id = match.group(1)
+            return {"name": company_id.replace("-", " ").replace("_", " ").title(),
+                    "career_url": f"https://jobs.smartrecruiters.com/{company_id}",
+                    "ats_type": "smartrecruiters", "job_title_hint": title}
+        return None
+
     def extract_company_from_wellfound(self, url, title, snippet):
         match = re.search(r"wellfound\.com/company/([^/]+)", url)
         if match:
@@ -370,6 +397,10 @@ class SerperDorker:
                 company = self.extract_company_from_lever(url, title)
             elif "jobs.ashbyhq.com" in url:
                 company = self.extract_company_from_ashby(url, title)
+            elif "apply.workable.com" in url:
+                company = self.extract_company_from_workable(url, title)
+            elif "jobs.smartrecruiters.com" in url:
+                company = self.extract_company_from_smartrecruiters(url, title)
             elif "wellfound.com" in url:
                 company = self.extract_company_from_wellfound(url, title, snippet)
             elif "linkedin.com" in url:

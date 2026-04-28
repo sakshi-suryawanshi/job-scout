@@ -281,7 +281,7 @@ with tab_applied:
     try:
         applied = [j for j in db.get_jobs(limit=5000, days=0)
                    if j.get("user_action") in ("applied", "responded", "interview", "interviewing")]
-        applied.sort(key=lambda j: j.get("applied_date") or "", reverse=True)
+        applied.sort(key=lambda j: j.get("applied_date") or "0000-00-00", reverse=True)
     except Exception:
         applied = []
 

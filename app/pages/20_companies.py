@@ -23,18 +23,22 @@ FUNDING_OPTIONS = ["", "bootstrapped", "pre-seed", "seed", "series_a", "series_b
 REGION_OPTIONS = ["africa", "asia", "europe", "latam", "north_america", "worldwide"]
 
 
-def _ats_index(val):
+def _ats_options_for(val) -> tuple:
+    """Return (options_list, default_index) without mutating the module-level list."""
     v = (val or "unknown").lower()
-    if v not in ATS_OPTIONS:
-        ATS_OPTIONS.append(v)
-    return ATS_OPTIONS.index(v)
+    opts = list(ATS_OPTIONS)           # local copy — never mutate shared state
+    if v not in opts:
+        opts.append(v)
+    return opts, opts.index(v)
 
 
-def _funding_index(val):
+def _funding_options_for(val) -> tuple:
+    """Return (options_list, default_index) without mutating the module-level list."""
     v = val or ""
-    if v not in FUNDING_OPTIONS:
-        FUNDING_OPTIONS.append(v)
-    return FUNDING_OPTIONS.index(v)
+    opts = list(FUNDING_OPTIONS)       # local copy
+    if v not in opts:
+        opts.append(v)
+    return opts, opts.index(v)
 
 
 st.title("🏢 Companies")
@@ -136,8 +140,10 @@ with tab_browse:
                         name = st.text_input("Name", value=company.get("name", ""))
                         career_url = st.text_input("Career URL", value=company.get("career_url", "") or "")
                         website = st.text_input("Website", value=company.get("website", "") or "")
-                        ats_type = st.selectbox("ATS Type", ATS_OPTIONS, index=_ats_index(company.get("ats_type")))
-                        funding_stage = st.selectbox("Funding Stage", FUNDING_OPTIONS, index=_funding_index(company.get("funding_stage")))
+                        _ats_opts, _ats_idx = _ats_options_for(company.get("ats_type"))
+                        ats_type = st.selectbox("ATS Type", _ats_opts, index=_ats_idx)
+                        _fund_opts, _fund_idx = _funding_options_for(company.get("funding_stage"))
+                        funding_stage = st.selectbox("Funding Stage", _fund_opts, index=_fund_idx)
                         headcount = st.number_input("Headcount", value=company.get("headcount") or 0, min_value=0)
                         regions_default = company.get("regions") or []
                         if isinstance(regions_default, str):

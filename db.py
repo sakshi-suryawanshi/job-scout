@@ -71,6 +71,14 @@ class Database:
             cutoff = (date.today() - timedelta(days=days)).isoformat()
             params["scraped_at"] = f"gte.{cutoff}"
         return self._count("jobs", params)
+
+    def count_scored_jobs(self) -> int:
+        """Lightweight count of jobs with a non-zero match_score."""
+        return self._count("jobs", {"match_score": "gt.0"})
+
+    def count_recommended_jobs(self, min_score: int = 70) -> int:
+        """Lightweight count of jobs scoring at or above min_score."""
+        return self._count("jobs", {"match_score": f"gte.{min_score}"})
     
     def add_company(self, company: Dict[str, Any]) -> Optional[Dict]:
         try:
@@ -147,9 +155,18 @@ class Database:
             return None
 
     def find_or_create_company(self, name: str, defaults: Dict = None) -> Optional[str]:
-        """Find company by name or create it. Returns company ID."""
+        """Find company by name or create it. Returns company ID.
+        Bumps last_seen on existing companies so auto-discovery cadence is visible.
+        """
+        from datetime import date as _date
         existing = self.get_company_by_name(name)
         if existing:
+            # Bump last_seen so we know this company was active recently
+            try:
+                self._request("PATCH", f"companies?id=eq.{existing['id']}",
+                              json={"last_seen": _date.today().isoformat()})
+            except Exception:
+                pass  # Non-fatal — last_seen is informational
             return existing["id"]
 
         company = {

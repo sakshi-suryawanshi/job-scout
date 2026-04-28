@@ -88,3 +88,25 @@ def test_no_duplicate_categories():
            "salary_min": 60000, "match_score": 90, "desperation_score": 80}
     cats = [c["category"] for c in classify_job(job)]
     assert len(cats) == len(set(cats))
+
+
+# ── Regional category ─────────────────────────────────────────────────────────
+
+def test_regional_asia_tagged():
+    job = {"title": "Engineer", "description": "Remote role, team is based in Singapore."}
+    assert "regional" in _cats(job)
+
+
+def test_regional_europe_tagged():
+    job = {"title": "Engineer", "description": "We are a startup based in Portugal, hiring remotely."}
+    assert "regional" in _cats(job)
+
+
+def test_regional_middle_east_tagged():
+    job = {"title": "Engineer", "description": "Hiring from the UAE and Israel office, remote OK."}
+    assert "regional" in _cats(job)
+
+
+def test_non_regional_not_tagged():
+    job = {"title": "Backend Engineer", "description": "Fully remote, work from anywhere."}
+    assert "regional" not in _cats(job)

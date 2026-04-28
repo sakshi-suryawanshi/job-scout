@@ -52,6 +52,26 @@ def get_all_slugs(db, ats_type: str) -> List[str]:
     return list(set(db_slugs + hardcoded.get(ats_type, [])))
 
 
+def _save_jobs(db, jobs: List[Dict], criteria: Dict) -> int:
+    """
+    Filter and persist a list of raw scraper jobs to DB.
+    Shared helper used by standalone scraper functions (workable, smartrecruiters, etc.).
+    Returns count of newly inserted jobs.
+    """
+    saved = 0
+    for job in jobs:
+        if not matches_criteria(job, criteria):
+            continue
+        company_id = db.find_or_create_company(
+            job.get("company_name", "Unknown"),
+            defaults={"source": "ats_scrape", "ats_type": job.get("ats_type", "unknown")},
+        )
+        db_job = to_db_job(job, company_id)
+        if db.upsert_job(db_job):
+            saved += 1
+    return saved
+
+
 _DEFAULT_CRITERIA = {
     "title_keywords": ["backend", "developer", "engineer", "software", "python", "golang", "full stack", "fullstack"],
     "required_skills": [],

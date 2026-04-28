@@ -26,8 +26,8 @@ _gemini_key = os.getenv("GEMINI_API_KEY", "")
 st.title("🔍 Discovery")
 st.caption("Find new jobs and companies from all sources in one place.")
 
-tab_scrape, tab_daily, tab_dorking, tab_hunt = st.tabs([
-    "🚀 Scrape Jobs", "⚡ Daily (LinkedIn/Indeed)", "🕵️ Serper Dorking", "🏭 Career Hunt"
+tab_scrape, tab_daily, tab_dorking, tab_hunt, tab_signals = st.tabs([
+    "🚀 Scrape Jobs", "⚡ Daily (LinkedIn/Indeed)", "🕵️ Serper Dorking", "🏭 Career Hunt", "📡 Signals"
 ])
 
 
@@ -102,6 +102,11 @@ with tab_scrape:
     st.subheader("Scrape ATS Boards + Job Boards")
 
     criteria = _criteria_form("scrape")
+
+    # Explicit save button visible regardless of which action the user takes
+    if st.button("💾 Save as default preferences", key="save_prefs_explicit"):
+        _save_prefs(criteria)
+        st.success("Preferences saved — they'll pre-fill this form on next visit.")
 
     st.divider()
     st.write("**Sources**")
@@ -444,3 +449,119 @@ with tab_hunt:
             except Exception as e:
                 st.error(f"Error: {e}")
                 import traceback; st.code(traceback.format_exc())
+
+        # ── Save / load custom queries ────────────────────────────────────────
+        st.divider()
+        st.write("**Saved Queries**")
+        import json as _json
+        from pathlib import Path as _Path
+
+        _QFILE = _Path(__file__).parent.parent.parent / "data" / "custom_queries.json"
+
+        def _load_queries() -> list:
+            try:
+                return _json.loads(_QFILE.read_text())
+            except Exception:
+                return []
+
+        def _save_query(label: str, tech: str, role: str, extra: str):
+            queries = _load_queries()
+            queries = [q for q in queries if q.get("label") != label]  # replace if exists
+            queries.append({"label": label, "tech": tech, "role": role, "extra": extra})
+            _QFILE.parent.mkdir(parents=True, exist_ok=True)
+            _QFILE.write_text(_json.dumps(queries, indent=2))
+
+        saved_queries = _load_queries()
+        if saved_queries:
+            selected_q = st.selectbox(
+                "Load saved query",
+                ["—"] + [q["label"] for q in saved_queries],
+                key="hunt_load_q",
+            )
+            if selected_q != "—":
+                q = next(q for q in saved_queries if q["label"] == selected_q)
+                st.caption(f"tech: `{q['tech']}` · role: `{q['role']}` · extra: `{q['extra']}`")
+                col_load, col_del = st.columns(2)
+                if col_load.button("📂 Load into form", key="hunt_load_btn", use_container_width=True):
+                    st.session_state["hunt_tech"] = q["tech"]
+                    st.session_state["hunt_role"] = q["role"]
+                    st.session_state["hunt_extra"] = q["extra"]
+                    st.rerun()
+                if col_del.button("🗑️ Delete query", key="hunt_del_btn", use_container_width=True):
+                    queries = [x for x in saved_queries if x["label"] != selected_q]
+                    _QFILE.write_text(_json.dumps(queries, indent=2))
+                    st.rerun()
+
+        with st.expander("💾 Save current query"):
+            q_label = st.text_input("Query name", placeholder="Python backend remote seed", key="hunt_qlabel")
+            if st.button("Save", key="hunt_save_btn") and q_label:
+                _save_query(
+                    q_label,
+                    st.session_state.get("hunt_tech", ""),
+                    st.session_state.get("hunt_role", ""),
+                    st.session_state.get("hunt_extra", ""),
+                )
+                st.success(f"Saved query: **{q_label}**")
+                st.rerun()
+
+
+# ── Tab 5: Signals ────────────────────────────────────────────────────────────
+with tab_signals:
+    st.subheader("📡 Saved Signals")
+    st.caption(
+        "Signals are saved when you run **Serper Dorking** with distress/funding/hidden_gems categories. "
+        "They indicate companies that may be urgently hiring."
+    )
+
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _load_signals(limit: int = 200):
+        try:
+            return db._request("GET", "signals", params={
+                "order": "created_at.desc", "limit": limit,
+            }) or []
+        except Exception:
+            return []
+
+    signals = _load_signals()
+
+    if not signals:
+        st.info(
+            "No signals saved yet.\n\n"
+            "**How to generate signals:**\n"
+            "1. Go to **Serper Dorking** tab\n"
+            "2. Select `distress_signals`, `funding_signals`, or `hidden_gems` categories\n"
+            "3. Check **Save distress/funding signals to DB**\n"
+            "4. Click **Run Dorking**"
+        )
+    else:
+        # Filters
+        sf1, sf2 = st.columns(2)
+        with sf1:
+            sig_types = sorted({s.get("signal_type", "unknown") for s in signals})
+            f_type = st.selectbox("Filter by type", ["All"] + sig_types, key="sig_type_f")
+        with sf2:
+            sig_search = st.text_input("Search company name", key="sig_search")
+
+        filtered_sigs = signals
+        if f_type != "All":
+            filtered_sigs = [s for s in filtered_sigs if s.get("signal_type") == f_type]
+        if sig_search:
+            filtered_sigs = [s for s in filtered_sigs if sig_search.lower() in (s.get("company_name") or "").lower()]
+
+        st.write(f"**{len(filtered_sigs)}** signals")
+
+        for sig in filtered_sigs[:100]:
+            company = sig.get("company_name") or sig.get("company") or "Unknown"
+            sig_type = sig.get("signal_type", "unknown")
+            snippet = sig.get("snippet") or sig.get("detail") or ""
+            created = str(sig.get("created_at", ""))[:10]
+            url = sig.get("url", "")
+
+            icon = {"distress": "🆘", "funding": "💰", "hidden_gem": "💎", "regional": "🌍"}.get(
+                sig_type.split("_")[0], "📡"
+            )
+            with st.expander(f"{icon} **{company}** — {sig_type} ({created})"):
+                if snippet:
+                    st.caption(snippet[:300])
+                if url:
+                    st.markdown(f"[🔗 Source]({url})")

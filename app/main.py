@@ -30,27 +30,27 @@ except Exception as e:
 @st.cache_data(ttl=60, show_spinner=False)
 def load_funnel():
     try:
-        # Use count helpers for accurate totals (no row-fetch limit)
-        total_companies = db.count_companies(active_only=True)
-        total_jobs      = db.count_jobs()
+        # All totals via lightweight count helpers — no row-fetch cap
+        total_companies  = db.count_companies(active_only=True)
+        total_jobs       = db.count_jobs()
+        total_scored     = db.count_scored_jobs()
+        total_recommended = db.count_recommended_jobs(min_score=70)
 
-        # Fetch recent rows for funnel breakdowns (actioned jobs are rare — limit is safe)
+        # Fetch actioned rows only — these are small in practice
         jobs = db.get_jobs(limit=10000, days=0)
-        applied     = [j for j in jobs if j.get("user_action") in ("applied", "responded", "interview", "interviewing")]
-        responded   = [j for j in jobs if j.get("user_action") == "responded"]
-        interviews  = [j for j in jobs if j.get("user_action") in ("interview", "interviewing")]
-        recommended = [j for j in jobs if (j.get("match_score", 0) or 0) >= 70]
-        scored      = [j for j in jobs if (j.get("match_score", 0) or 0) > 0]
-        saved       = [j for j in jobs if j.get("user_action") == "saved"]
+        applied    = [j for j in jobs if j.get("user_action") in ("applied", "responded", "interview", "interviewing")]
+        responded  = [j for j in jobs if j.get("user_action") == "responded"]
+        interviews = [j for j in jobs if j.get("user_action") in ("interview", "interviewing")]
+        saved      = [j for j in jobs if j.get("user_action") == "saved"]
         return {
-            "companies": total_companies,
-            "jobs":      total_jobs,
-            "scored":    len(scored),
-            "recommended": len(recommended),
-            "saved":     len(saved),
-            "applied":   len(applied),
-            "responded": len(responded),
-            "interviews": len(interviews),
+            "companies":   total_companies,
+            "jobs":        total_jobs,
+            "scored":      total_scored,
+            "recommended": total_recommended,
+            "saved":       len(saved),
+            "applied":     len(applied),
+            "responded":   len(responded),
+            "interviews":  len(interviews),
         }
     except Exception:
         return {}
@@ -86,14 +86,20 @@ funnel   = load_funnel()
 last_run = load_last_pipeline_run()
 quota    = load_quota()
 
-# ── Funnel metrics ─────────────────────────────────────────────────────────────
+# ── Funnel metrics — two rows of 4 so labels don't truncate ───────────────────
 st.subheader("Job Hunt Funnel")
-cols = st.columns(8)
-for col, (label, val) in zip(cols, [
+# Row 1: inventory (pipeline inputs)
+inv_cols = st.columns(4)
+for col, (label, val) in zip(inv_cols, [
     ("🏢 Companies",   funnel.get("companies", 0)),
     ("📥 Discovered",  funnel.get("jobs", 0)),
     ("🤖 Scored",      funnel.get("scored", 0)),
     ("⭐ Recommended", funnel.get("recommended", 0)),
+]):
+    col.metric(label, val)
+# Row 2: pipeline outcomes
+pipe_cols = st.columns(4)
+for col, (label, val) in zip(pipe_cols, [
     ("💾 Saved",       funnel.get("saved", 0)),
     ("✅ Applied",     funnel.get("applied", 0)),
     ("💬 Responses",   funnel.get("responded", 0)),

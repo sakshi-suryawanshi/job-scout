@@ -33,3 +33,6 @@ jobs:
 
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short
+
+      - name: Run integration tests (no DB required)
+        run: pytest tests/integration/ -v --tb=short -m "not requires_db"

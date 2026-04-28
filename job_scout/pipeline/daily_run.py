@@ -93,7 +93,10 @@ def run_pipeline(
         run_stats dict with per-stage results and the pipeline_run id.
     """
     if db is None:
-        from db import get_db
+        try:
+            from db import get_db          # works when running from repo root
+        except ImportError:
+            from job_scout.db.client import get_db  # fallback for installed-package context
         db = get_db()
 
     if config is None:
