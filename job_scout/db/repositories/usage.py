@@ -7,18 +7,35 @@ from job_scout.db.client import get_db
 
 
 def record_usage(provider: str, count: int = 1) -> None:
-    """Increment usage counter for provider in the api_usage table."""
+    """Increment usage counter for provider in the api_usage table.
+
+    Uses read-then-write (GET + PATCH, or POST on first call).
+    merge-duplicates REPLACES the row so we must compute the new total ourselves.
+    Race condition risk is negligible for a single-user pipeline.
+    """
     db = get_db()
     period_key = date.today().isoformat()
     try:
-        # Try update first (upsert via merge-duplicates)
-        payload = {"provider": provider, "period_key": period_key, "count": count,
-                   "last_call_at": date.today().isoformat()}
-        db._request("POST", "api_usage", json=payload,
-                    headers={**db.headers, "Prefer": "resolution=merge-duplicates,return=representation"})
+        existing = db._request("GET", "api_usage", params={
+            "provider": f"eq.{provider}",
+            "period_key": f"eq.{period_key}",
+            "limit": 1,
+        })
+        if existing:
+            new_count = (existing[0].get("count") or 0) + count
+            db._request("PATCH", "api_usage", params={
+                "provider": f"eq.{provider}",
+                "period_key": f"eq.{period_key}",
+            }, json={"count": new_count, "last_call_at": period_key})
+        else:
+            db._request("POST", "api_usage", json={
+                "provider": provider,
+                "period_key": period_key,
+                "count": count,
+                "last_call_at": period_key,
+            })
     except Exception:
-        # Fallback: just log silently — never crash the main pipeline over quota tracking
-        pass
+        pass  # Never crash the pipeline over quota tracking
 
 
 def get_usage_today(provider: str) -> Dict:

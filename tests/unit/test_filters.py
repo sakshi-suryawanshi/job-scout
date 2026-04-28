@@ -117,3 +117,68 @@ def test_missing_salary_passes_salary_filter():
     crit = {**_BASE_CRITERIA, "required_skills": [], "min_salary": 50000}
     job = _job()  # no salary fields
     assert matches_criteria(job, crit) is True
+
+
+# ── Global remote filter ──────────────────────────────────────────────────────
+
+def test_global_remote_rejects_us_city():
+    crit = {**_BASE_CRITERIA, "required_skills": [], "global_remote_only": True}
+    job = _job(is_remote=True, location="New York, US")
+    assert matches_criteria(job, crit) is False
+
+
+def test_global_remote_rejects_india_city():
+    crit = {**_BASE_CRITERIA, "required_skills": [], "global_remote_only": True}
+    job = _job(is_remote=True, location="Bangalore")
+    assert matches_criteria(job, crit) is False
+
+
+def test_global_remote_accepts_blank_location():
+    crit = {**_BASE_CRITERIA, "required_skills": [], "global_remote_only": True}
+    job = _job(is_remote=True, location="")
+    assert matches_criteria(job, crit) is True
+
+
+def test_global_remote_accepts_worldwide():
+    crit = {**_BASE_CRITERIA, "required_skills": [], "global_remote_only": True}
+    job = _job(is_remote=True, location="Worldwide")
+    assert matches_criteria(job, crit) is True
+
+
+def test_global_remote_accepts_work_from_anywhere():
+    crit = {**_BASE_CRITERIA, "required_skills": [], "global_remote_only": True}
+    job = _job(is_remote=True, location="Work from anywhere")
+    assert matches_criteria(job, crit) is True
+
+
+def test_global_remote_false_does_not_filter():
+    """global_remote_only=False should not reject US-city remote jobs."""
+    crit = {**_BASE_CRITERIA, "required_skills": [], "global_remote_only": False}
+    job = _job(is_remote=True, location="New York, US")
+    assert matches_criteria(job, crit) is True
+
+
+# ── None / missing field safety ───────────────────────────────────────────────
+
+def test_none_title_does_not_crash_and_fails_keyword():
+    crit = {**_BASE_CRITERIA, "required_skills": []}
+    job = _job(title=None)
+    assert matches_criteria(job, crit) is False  # no title → no keyword match
+
+
+def test_none_description_does_not_crash():
+    crit = {**_BASE_CRITERIA, "required_skills": []}
+    job = _job(description=None)
+    assert matches_criteria(job, crit) is True  # passes when required_skills=[]
+
+
+def test_none_location_remote_check():
+    """Job with location=None and is_remote=True should pass remote filter."""
+    crit = {**_BASE_CRITERIA, "required_skills": [], "remote_only": True}
+    job = _job(location=None, is_remote=True)
+    assert matches_criteria(job, crit) is True
+
+
+def test_empty_criteria_title_keywords_passes_all():
+    crit = {**_BASE_CRITERIA, "title_keywords": [], "required_skills": []}
+    assert matches_criteria(_job(title="Anything random"), crit) is True

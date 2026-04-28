@@ -7,10 +7,16 @@ from job_scout.scraping.base import clean_html, is_remote
 
 
 class RemoteOKScraper:
-    def get_jobs(self) -> List[Dict]:
+    def get_jobs(self, tags: List[str] = None) -> List[Dict]:
+        """Fetch from RemoteOK. Pass tags for server-side filtering (e.g. ["python", "backend"]).
+        Tags must be lowercase; RemoteOK tag matching is case-sensitive.
+        """
         try:
             client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
-            data = client.get("https://remoteok.com/api").json()
+            params = {}
+            if tags:
+                params["tags"] = ",".join(t.lower() for t in tags)
+            data = client.get("https://remoteok.com/api", params=params).json()
             return [
                 {
                     "title": i.get("position", ""),

@@ -128,3 +128,108 @@ def test_find_no_matching_rule():
 
 def test_empty_rules_returns_none():
     assert find_matching_rule(_JOB, []) is None
+
+
+# ── Untested operators: <, <=, >, !=, not_in, none_of ────────────────────────
+
+def test_lt_passes():
+    assert _eval_condition({"match_score": 3}, {"field": "match_score", "op": "<", "value": 5}) is True
+
+
+def test_lt_fails():
+    assert _eval_condition({"match_score": 5}, {"field": "match_score", "op": "<", "value": 5}) is False
+
+
+def test_lte_passes():
+    assert _eval_condition({"match_score": 5}, {"field": "match_score", "op": "<=", "value": 5}) is True
+
+
+def test_gt_passes():
+    assert _eval_condition({"match_score": 6}, {"field": "match_score", "op": ">", "value": 5}) is True
+
+
+def test_gt_fails():
+    assert _eval_condition({"match_score": 5}, {"field": "match_score", "op": ">", "value": 5}) is False
+
+
+def test_neq_passes():
+    assert _eval_condition({"ats_type": "workday"}, {"field": "ats_type", "op": "!=", "value": "greenhouse"}) is True
+
+
+def test_neq_fails():
+    assert _eval_condition({"ats_type": "greenhouse"}, {"field": "ats_type", "op": "!=", "value": "greenhouse"}) is False
+
+
+def test_not_in_passes():
+    assert _eval_condition({"ats_type": "workday"}, {"field": "ats_type", "op": "not_in", "value": ["greenhouse", "lever"]}) is True
+
+
+def test_not_in_fails():
+    assert _eval_condition({"ats_type": "greenhouse"}, {"field": "ats_type", "op": "not_in", "value": ["greenhouse", "lever"]}) is False
+
+
+def test_none_of_passes_when_none_match():
+    rule = {
+        "name": "Exclude low score or workday",
+        "is_active": True,
+        "priority": 5,
+        "conditions": {
+            "none_of": [
+                {"field": "match_score", "op": "<", "value": 50},
+                {"field": "ats_type", "op": "==", "value": "workday"},
+            ]
+        },
+        "action": {"type": "auto_apply"},
+    }
+    good_job = {**_JOB, "match_score": 80, "ats_type": "greenhouse"}
+    assert match_rule(good_job, rule) is True
+
+
+def test_none_of_fails_when_one_matches():
+    rule = {
+        "name": "Exclude low score or workday",
+        "is_active": True,
+        "priority": 5,
+        "conditions": {
+            "none_of": [
+                {"field": "match_score", "op": "<", "value": 50},
+                {"field": "ats_type", "op": "==", "value": "workday"},
+            ]
+        },
+        "action": {"type": "auto_apply"},
+    }
+    bad_job = {**_JOB, "match_score": 30}
+    assert match_rule(bad_job, rule) is False
+
+
+def test_missing_field_defaults_to_zero_for_numeric_ops():
+    """A job missing a field should not crash — numeric ops default the value to 0."""
+    assert _eval_condition({}, {"field": "match_score", "op": ">=", "value": 0}) is True
+    assert _eval_condition({}, {"field": "match_score", "op": ">=", "value": 1}) is False
+
+
+def test_nested_all_of_inside_any_of():
+    rule = {
+        "name": "Nested conditions",
+        "is_active": True,
+        "priority": 5,
+        "conditions": {
+            "any_of": [
+                {"all_of": [
+                    {"field": "match_score", "op": ">=", "value": 90},
+                    {"field": "ats_type", "op": "==", "value": "greenhouse"},
+                ]},
+                {"field": "desperation_score", "op": ">=", "value": 80},
+            ]
+        },
+        "action": {"type": "auto_apply"},
+    }
+    # First branch: high score + greenhouse
+    job_branch1 = {**_JOB, "match_score": 92, "ats_type": "greenhouse", "desperation_score": 20}
+    assert match_rule(job_branch1, rule) is True
+    # Second branch: high desperation (different ATS)
+    job_branch2 = {**_JOB, "match_score": 60, "ats_type": "lever", "desperation_score": 85}
+    assert match_rule(job_branch2, rule) is True
+    # Neither branch
+    job_neither = {**_JOB, "match_score": 60, "ats_type": "lever", "desperation_score": 20}
+    assert match_rule(job_neither, rule) is False

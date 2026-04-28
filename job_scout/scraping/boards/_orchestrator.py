@@ -63,9 +63,10 @@ def _get_enabled_boards(all_keys: list) -> list:
     return [k for k in all_keys if k in _DEFAULT_BOARDS]
 
 
-def _all_boards_registry() -> dict:
+def _all_boards_registry(criteria: Dict = None) -> dict:
+    tags = (criteria or {}).get("title_keywords", [])
     return {
-        "remoteok":             ("RemoteOK",             lambda: RemoteOKScraper().get_jobs()),
+        "remoteok":             ("RemoteOK",             lambda: RemoteOKScraper().get_jobs(tags=tags or None)),
         "remotive":             ("Remotive",              lambda: RemotiveScraper().get_jobs(category="software-dev", limit=200)),
         "weworkremotely":       ("WeWorkRemotely",        lambda: WeWorkRemotelyScraper().get_jobs()),
         "hackernews":           ("HN Who's Hiring",       lambda: HackerNewsScraper().get_jobs(months=2)),
@@ -111,6 +112,9 @@ def _all_boards_registry() -> dict:
     }
 
 
+_MAX_FETCH_WORKERS = 10  # concurrent HTTP fetches
+
+
 def scrape_board_jobs(
     db,
     boards: List[str] = None,
@@ -119,33 +123,64 @@ def scrape_board_jobs(
 ) -> Dict:
     """
     Scrape jobs from all job boards, filter, save to DB.
+    Fetches boards in parallel (up to _MAX_FETCH_WORKERS at once) then
+    saves results serially so DB access is single-threaded.
     Returns {"total_scraped", "matched", "saved", "errors", "by_board"}.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     if criteria is None:
         criteria = _DEFAULT_CRITERIA
 
-    all_boards = _all_boards_registry()
+    all_boards = _all_boards_registry(criteria)
 
     if boards is None:
         boards = _get_enabled_boards(list(all_boards.keys()))
 
+    active = [(k, all_boards[k][0], all_boards[k][1]) for k in boards if k in all_boards]
     stats = {"total_scraped": 0, "matched": 0, "saved": 0, "errors": 0, "by_board": {}}
-    total_boards = len(boards)
 
-    for i, board_key in enumerate(boards):
-        if board_key not in all_boards:
-            continue
+    if not active:
+        return stats
 
-        board_name, fetch_fn = all_boards[board_key]
+    # ── Phase 1: parallel HTTP fetch ──────────────────────────────────────────
+    if progress_callback:
+        progress_callback("Fetching job boards in parallel…", 0.0)
 
-        if progress_callback:
-            progress_callback(f"Scraping {board_name}...", i / total_boards)
+    fetch_results: Dict[str, object] = {}
+    with ThreadPoolExecutor(max_workers=_MAX_FETCH_WORKERS) as executor:
+        futures = {executor.submit(fn): key for key, _, fn in active}
+        done = 0
+        for future in as_completed(futures):
+            key = futures[future]
+            done += 1
+            try:
+                fetch_results[key] = future.result()
+            except Exception as exc:
+                fetch_results[key] = exc
+            if progress_callback:
+                progress_callback(
+                    f"Fetched {done}/{len(active)} boards…",
+                    done / len(active) * 0.5,
+                )
 
+    # ── Phase 2: serial filter + save ────────────────────────────────────────
+    for i, (key, name, _fn) in enumerate(active):
+        result = fetch_results.get(key)
         board_stats = {"scraped": 0, "matched": 0, "saved": 0}
 
+        if progress_callback:
+            progress_callback(f"Saving {name}…", 0.5 + i / len(active) * 0.5)
+
+        if isinstance(result, Exception):
+            stats["errors"] += 1
+            print(f"  {name}: fetch error — {result}")
+            stats["by_board"][key] = board_stats
+            continue
+
         try:
-            print(f"\n--- {board_name} ---")
-            jobs = fetch_fn()
+            print(f"\n--- {name} ---")
+            jobs = result or []
             board_stats["scraped"] = len(jobs)
             print(f"  Fetched {len(jobs)} jobs")
 
@@ -161,6 +196,20 @@ def scrape_board_jobs(
                 db_job = to_db_job(job, company_id)
                 if db.upsert_job(db_job):
                     board_stats["saved"] += 1
+                    # Compute rule-based score at ingest so Browse Jobs is useful immediately
+                    try:
+                        from job_scout.ai.gemini import score_job_rule_based
+                        score_result = score_job_rule_based(db_job, criteria)
+                        if score_result.get("score", 0) > 0 and db_job.get("fingerprint"):
+                            db._request(
+                                "PATCH", f"jobs?fingerprint=eq.{db_job['fingerprint']}",
+                                json={
+                                    "match_score": score_result["score"],
+                                    "match_reason": score_result.get("match_reason", ""),
+                                },
+                            )
+                    except Exception:
+                        pass  # Non-fatal — scoring can run in Stage 5 instead
 
             print(f"  Saved {board_stats['saved']} new jobs")
 
@@ -170,7 +219,7 @@ def scrape_board_jobs(
             import traceback
             traceback.print_exc()
 
-        stats["by_board"][board_key] = board_stats
+        stats["by_board"][key] = board_stats
         stats["total_scraped"] += board_stats["scraped"]
         stats["matched"] += board_stats["matched"]
         stats["saved"] += board_stats["saved"]

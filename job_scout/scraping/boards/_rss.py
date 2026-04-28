@@ -1,20 +1,70 @@
 # job_scout/scraping/boards/_rss.py
 """Generic RSS/Atom feed parser + all RSS-based board scrapers."""
 
+import json
+import os
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import List, Dict
 from job_scout.scraping.base import clean_html, is_remote
 
 _NS_ATOM = "http://www.w3.org/2005/Atom"
 
+_CACHE_FILE = Path(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)
+    )))),
+    "data", "scrape_cache.json",
+)
+
+
+def _load_cache() -> dict:
+    try:
+        return json.loads(_CACHE_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_cache(cache: dict):
+    try:
+        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    except Exception:
+        pass
+
 
 def parse_rss_feed(feed_url: str, source_board: str, limit: int = 80) -> List[Dict]:
-    """Parse any standard RSS 2.0 or Atom feed for job listings."""
+    """Parse any standard RSS 2.0 or Atom feed for job listings.
+    Sends ETag / If-Modified-Since headers — returns [] on 304 Not Modified.
+    """
     import httpx
     try:
-        client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
+        cache = _load_cache()
+        cached = cache.get(feed_url, {})
+        headers = {"User-Agent": "JobScout/1.0"}
+        if cached.get("etag"):
+            headers["If-None-Match"] = cached["etag"]
+        if cached.get("last_modified"):
+            headers["If-Modified-Since"] = cached["last_modified"]
+
+        client = httpx.Client(timeout=30, headers=headers)
         response = client.get(feed_url)
+
+        if response.status_code == 304:
+            # Feed unchanged — no new jobs
+            return []
+
         response.raise_for_status()
+
+        # Update cache headers for next request
+        new_cached = {}
+        if response.headers.get("ETag"):
+            new_cached["etag"] = response.headers["ETag"]
+        if response.headers.get("Last-Modified"):
+            new_cached["last_modified"] = response.headers["Last-Modified"]
+        if new_cached:
+            cache[feed_url] = new_cached
+            _save_cache(cache)
         root = ET.fromstring(response.content)
 
         items = root.findall(".//item")

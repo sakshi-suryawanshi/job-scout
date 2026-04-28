@@ -23,10 +23,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install httpx pytest ruff
+          pip install httpx pytest ruff mypy typing_extensions
 
       - name: Lint with ruff
         run: ruff check job_scout/ tests/ --select E,F,W --ignore E501,W291,W293
+
+      - name: Type-check with mypy
+        run: mypy job_scout/core/ job_scout/pipeline/rules_engine.py --ignore-missing-imports --no-strict-optional
 
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short

@@ -21,8 +21,14 @@ def test_normalize_strips_yc_batch():
 
 
 def test_normalize_lowercases_and_collapses_whitespace():
+    # "Senior" is stripped by seniority normalization — expected after Fix 14
+    result = normalize_text("  Backend  Engineer  ")
+    assert result == "backend engineer"
+
+
+def test_normalize_strips_seniority_and_collapses_whitespace():
     result = normalize_text("  Senior  Backend  Engineer  ")
-    assert result == "senior backend engineer"
+    assert result == "backend engineer"  # "senior" stripped
 
 
 def test_normalize_removes_punctuation():
@@ -68,6 +74,40 @@ def test_fingerprint_ignores_yc_batch():
 def test_fingerprint_is_32_chars():
     fp = generate_job_fingerprint("Engineer", "Acme")
     assert len(fp) == 32
+
+
+# ── Seniority stripping ───────────────────────────────────────────────────────
+
+def test_fingerprint_strips_senior_prefix():
+    """'Senior Backend Engineer' and 'Backend Engineer' at same company → same fingerprint."""
+    fp1 = generate_job_fingerprint("Senior Backend Engineer", "Acme")
+    fp2 = generate_job_fingerprint("Backend Engineer", "Acme")
+    assert fp1 == fp2
+
+
+def test_fingerprint_strips_lead_prefix():
+    fp1 = generate_job_fingerprint("Lead Backend Engineer", "Acme")
+    fp2 = generate_job_fingerprint("Backend Engineer", "Acme")
+    assert fp1 == fp2
+
+
+def test_fingerprint_strips_sr_abbreviation():
+    fp1 = generate_job_fingerprint("Sr. Software Engineer", "Acme")
+    fp2 = generate_job_fingerprint("Software Engineer", "Acme")
+    assert fp1 == fp2
+
+
+def test_fingerprint_strips_junior():
+    fp1 = generate_job_fingerprint("Junior Python Developer", "Acme")
+    fp2 = generate_job_fingerprint("Python Developer", "Acme")
+    assert fp1 == fp2
+
+
+def test_normalize_strips_seniority():
+    from job_scout.enrichment.dedup import normalize_text
+    assert "senior" not in normalize_text("Senior Backend Engineer")
+    assert "lead" not in normalize_text("Lead Engineer")
+    assert normalize_text("Senior Backend Engineer") == normalize_text("Backend Engineer")
 
 
 # ── is_globally_remote ────────────────────────────────────────────────────────

@@ -12,8 +12,12 @@ except Exception as e:
     st.stop()
 
 # ── ATS / funding options — single source of truth ───────────────────────────
+# Scrapers exist for: greenhouse, lever, ashby, workable, smartrecruiters
+# Workday is included for tagging but has no scraper (no public API — deferred)
 ATS_OPTIONS = ["greenhouse", "lever", "ashby", "workable", "smartrecruiters",
                "workday", "bamboohr", "pallet", "custom", "unknown"]
+# ATS types that have working scrapers in _pipeline.py
+_SCRAPED_ATS = {"greenhouse", "lever", "ashby", "workable", "smartrecruiters"}
 FUNDING_OPTIONS = ["", "bootstrapped", "pre-seed", "seed", "series_a", "series_b",
                    "series_c", "public"]
 REGION_OPTIONS = ["africa", "asia", "europe", "latam", "north_america", "worldwide"]
@@ -182,6 +186,8 @@ with tab_add:
             career_url = st.text_input("Career Page URL *", placeholder="https://company.com/careers")
             website = st.text_input("Website", placeholder="https://company.com")
             ats_type = st.selectbox("ATS Type", ATS_OPTIONS)
+            if ats_type not in _SCRAPED_ATS and ats_type not in ("custom", "unknown", ""):
+                st.caption(f"⚠️ No scraper for **{ats_type}** yet — jobs won't be auto-scraped.")
         with c2:
             funding_stage = st.selectbox("Funding Stage", FUNDING_OPTIONS)
             headcount = st.number_input("Headcount", min_value=0, step=1)
@@ -306,5 +312,27 @@ with tab_discover:
                     st.error(f"Error: {e}")
 
     st.divider()
-    st.write("**Product Hunt**")
-    st.info("⚠️ Product Hunt (403 Forbidden). Use Discovery → Serper Dorking with `job_boards` or `hidden_gems` categories instead.")
+    d3, d4 = st.columns(2)
+
+    with d3:
+        st.write("**remoteintech/remote-jobs**")
+        st.caption("700+ curated globally-remote companies from the community-maintained GitHub list.")
+        if st.button("🔄 Sync remoteintech list", use_container_width=True, key="ri_btn"):
+            with st.spinner("Fetching from GitHub…"):
+                try:
+                    from job_scout.discovery.github_lists import import_remoteintech_to_db
+                    result = import_remoteintech_to_db(db)
+                    st.success(
+                        f"✅ Synced: **{result['inserted']}** new companies, "
+                        f"{result['skipped']} already in DB"
+                    )
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    with d4:
+        st.write("**Product Hunt**")
+        st.info(
+            "⚠️ Product Hunt blocks scrapers (403). "
+            "Use **Discovery → Serper Dorking** with the `job_boards` or `hidden_gems` "
+            "category to find PH-launched startups via Google."
+        )

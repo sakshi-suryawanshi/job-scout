@@ -30,8 +30,12 @@ except Exception as e:
 @st.cache_data(ttl=60, show_spinner=False)
 def load_funnel():
     try:
-        jobs = db.get_jobs(limit=5000, days=0)
-        companies = db.get_companies(active_only=True)
+        # Use count helpers for accurate totals (no row-fetch limit)
+        total_companies = db.count_companies(active_only=True)
+        total_jobs      = db.count_jobs()
+
+        # Fetch recent rows for funnel breakdowns (actioned jobs are rare — limit is safe)
+        jobs = db.get_jobs(limit=10000, days=0)
         applied     = [j for j in jobs if j.get("user_action") in ("applied", "responded", "interview", "interviewing")]
         responded   = [j for j in jobs if j.get("user_action") == "responded"]
         interviews  = [j for j in jobs if j.get("user_action") in ("interview", "interviewing")]
@@ -39,12 +43,12 @@ def load_funnel():
         scored      = [j for j in jobs if (j.get("match_score", 0) or 0) > 0]
         saved       = [j for j in jobs if j.get("user_action") == "saved"]
         return {
-            "companies": len(companies),
-            "jobs": len(jobs),
-            "scored": len(scored),
+            "companies": total_companies,
+            "jobs":      total_jobs,
+            "scored":    len(scored),
             "recommended": len(recommended),
-            "saved": len(saved),
-            "applied": len(applied),
+            "saved":     len(saved),
+            "applied":   len(applied),
             "responded": len(responded),
             "interviews": len(interviews),
         }

@@ -16,12 +16,21 @@ _COMPANY_SUFFIXES = re.compile(
 
 _YC_BATCH = re.compile(r"\((?:YC\s*)?[WSF]\d{2}\)", re.IGNORECASE)
 
+# Strip seniority qualifiers so "Senior Backend Engineer" deduplicates with
+# "Backend Engineer" and "Lead Backend Engineer" at the same company.
+_SENIORITY = re.compile(
+    r"\b(senior|sr\.?|lead|principal|staff|jr\.?|junior|associate|"
+    r"mid-?level|entry-?level|ii|iii|iv|i\b)\b",
+    re.IGNORECASE,
+)
+
 
 def normalize_text(text: str) -> str:
-    """Lowercase, strip punctuation, collapse whitespace, remove company suffixes."""
+    """Lowercase, strip punctuation/suffixes/seniority, collapse whitespace."""
     text = (text or "").lower().strip()
     text = _COMPANY_SUFFIXES.sub("", text)
     text = _YC_BATCH.sub("", text)
+    text = _SENIORITY.sub("", text)
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text

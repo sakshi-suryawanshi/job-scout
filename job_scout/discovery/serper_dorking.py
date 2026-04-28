@@ -492,11 +492,8 @@ def parse_serper_result_as_job(result: Dict, source_category: str) -> Optional[D
         lo, hi = int(salary_match.group(1)), int(salary_match.group(2))
         salary_min = lo * 1000 if lo < 300 else lo
         salary_max = hi * 1000 if hi < 300 else hi
-    import hashlib
-    import json as _json
-    fingerprint = hashlib.sha256(
-        _json.dumps({"title": job_title, "company": company_name, "url": url}, sort_keys=True).encode()
-    ).hexdigest()
+    from job_scout.enrichment.dedup import generate_job_fingerprint
+    fingerprint = generate_job_fingerprint(job_title, company_name)
     source = "linkedin_serper" if "linkedin.com" in url else "indeed_serper"
     return {
         "title": job_title, "company": company_name, "url": url,

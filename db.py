@@ -38,6 +38,39 @@ class Database:
         response = self.client.request(method, url, **kwargs)
         response.raise_for_status()
         return response.json() if response.content else None
+
+    def _count(self, table: str, params: dict = None) -> int:
+        """Return exact row count for a table via PostgREST Content-Range header.
+        Sends limit=0 so no rows are transferred — only the count header.
+        """
+        try:
+            resp = self.client.get(
+                f"{self.rest_url}/{table}",
+                params={**(params or {}), "limit": 0},
+                headers={**self.headers, "Prefer": "count=exact"},
+            )
+            content_range = resp.headers.get("Content-Range", "")
+            if "/" in content_range:
+                total = content_range.split("/")[-1]
+                if total.lstrip("-").isdigit():
+                    return int(total)
+        except Exception:
+            pass
+        return 0
+
+    def count_companies(self, active_only: bool = True) -> int:
+        """Lightweight company count — no rows fetched."""
+        params = {"is_active": "eq.true"} if active_only else {}
+        return self._count("companies", params)
+
+    def count_jobs(self, days: int = 0) -> int:
+        """Lightweight job count — no rows fetched."""
+        from datetime import date, timedelta
+        params = {}
+        if days > 0:
+            cutoff = (date.today() - timedelta(days=days)).isoformat()
+            params["scraped_at"] = f"gte.{cutoff}"
+        return self._count("jobs", params)
     
     def add_company(self, company: Dict[str, Any]) -> Optional[Dict]:
         try:
@@ -157,12 +190,20 @@ class Database:
         except Exception:
             return None
 
-    def upsert_job(self, job: Dict[str, Any]) -> Optional[Dict]:
+    def upsert_job(self, job: Dict[str, Any], exclude_keywords: list = None) -> Optional[Dict]:
         """
         Insert a job, deduplicating by fingerprint.
         If a job with the same fingerprint exists, merge source_boards.
         Returns the job dict if newly inserted, None if duplicate/merged.
+
+        exclude_keywords: optional list of title keywords to reject at the DB boundary,
+        regardless of which scraper called this. Last line of defence.
         """
+        if exclude_keywords:
+            title_lower = (job.get("title") or "").lower()
+            if any(kw.lower() in title_lower for kw in exclude_keywords):
+                return None
+
         fingerprint = job.get("fingerprint")
         if fingerprint:
             existing = self.get_job_by_fingerprint(fingerprint)

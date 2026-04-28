@@ -40,6 +40,27 @@ def _load_prefs():
     except Exception:
         return {}
 
+
+def _save_prefs(criteria: dict):
+    """Persist criteria back to user_profile.preferences so the form pre-fills next session."""
+    try:
+        result = db._request("GET", "user_profile", params={"limit": 1})
+        if not result:
+            return
+        prefs_update = {
+            "title_keywords": criteria.get("title_keywords", []),
+            "skills": criteria.get("required_skills", []),
+            "exclude_keywords": criteria.get("exclude_keywords", []),
+            "remote_only": criteria.get("remote_only", True),
+            "global_remote": criteria.get("global_remote_only", True),
+            "max_yoe": criteria.get("max_yoe", 5),
+            "min_salary": criteria.get("min_salary"),
+        }
+        db._request("PATCH", f"user_profile?id=eq.{result[0]['id']}",
+                    json={"preferences": prefs_update})
+    except Exception as _e:
+        print(f"_save_prefs: {_e}")
+
 def _criteria_form(key_prefix: str):
     prefs = _load_prefs()
     c1, c2 = st.columns(2)
@@ -135,6 +156,7 @@ with tab_scrape:
     st.write(f"**{total} sources selected**")
 
     if st.button("🚀 Start Scraping", use_container_width=True, type="primary", disabled=total == 0):
+        _save_prefs(criteria)   # Auto-save criteria so next session pre-fills correctly
         from job_scout.scraping.ats import scrape_ats_jobs
         from job_scout.scraping.boards import scrape_board_jobs
         from job_scout.scraping.careers import scrape_career_pages
