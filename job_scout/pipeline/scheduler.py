@@ -84,8 +84,19 @@ def _run_pipeline_now(cfg: Dict) -> None:
 
 
 def next_run_datetime(run_time: str) -> datetime:
-    """Return the next datetime when the pipeline should run."""
-    h, m = [int(x) for x in run_time.split(":")]
+    """Return the next datetime when the pipeline should run.
+    Falls back to 07:00 if run_time is invalid (malformed config should not crash the scheduler).
+    """
+    try:
+        parts = run_time.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"expected HH:MM, got {run_time!r}")
+        h, m = int(parts[0]), int(parts[1])
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError(f"time out of range: {h:02d}:{m:02d}")
+    except (ValueError, IndexError, TypeError) as e:
+        log.warning(f"Invalid run_time {run_time!r} ({e}) — defaulting to 07:00")
+        h, m = 7, 0
     now = datetime.now()
     candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
     if candidate <= now:

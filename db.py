@@ -69,7 +69,7 @@ class Database:
         params = {}
         if days > 0:
             cutoff = (date.today() - timedelta(days=days)).isoformat()
-            params["scraped_at"] = f"gte.{cutoff}"
+            params["discovered_at"] = f"gte.{cutoff}"   # column defined in migration 001 / indexed in 010
         return self._count("jobs", params)
 
     def count_scored_jobs(self) -> int:
@@ -161,12 +161,12 @@ class Database:
         from datetime import date as _date
         existing = self.get_company_by_name(name)
         if existing:
-            # Bump last_seen so we know this company was active recently
+            # Bump last_seen_at so auto-discovery cadence is visible
             try:
                 self._request("PATCH", f"companies?id=eq.{existing['id']}",
-                              json={"last_seen": _date.today().isoformat()})
+                              json={"last_seen_at": _date.today().isoformat()})
             except Exception:
-                pass  # Non-fatal — last_seen is informational
+                pass  # Non-fatal — last_seen_at is informational
             return existing["id"]
 
         company = {

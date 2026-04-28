@@ -70,8 +70,9 @@ def send_outreach_email(
 
     # Send via Gmail SMTP
     try:
+        import html as _html
         from job_scout.notifications.email import send_email
-        html_body = f"<pre style='font-family:Georgia,serif;white-space:pre-wrap'>{body}</pre>"
+        html_body = f"<pre style='font-family:Georgia,serif;white-space:pre-wrap'>{_html.escape(body)}</pre>"
         sent = send_email(to=recipient, subject=subject, html_body=html_body)
         if sent:
             return ApplyResult(

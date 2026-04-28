@@ -62,10 +62,15 @@ def _save_jobs(db, jobs: List[Dict], criteria: Dict) -> int:
     for job in jobs:
         if not matches_criteria(job, criteria):
             continue
+        # Use `or` so an empty-string company_name falls back to "Unknown"
+        name = job.get("company_name") or "Unknown"
         company_id = db.find_or_create_company(
-            job.get("company_name", "Unknown"),
+            name,
             defaults={"source": "ats_scrape", "ats_type": job.get("ats_type", "unknown")},
         )
+        if not company_id:
+            print(f"  _save_jobs: could not get company_id for '{name}' — skipping job")
+            continue
         db_job = to_db_job(job, company_id)
         if db.upsert_job(db_job):
             saved += 1

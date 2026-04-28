@@ -19,26 +19,40 @@ class ApplyResult:
     cover_letter: str = ""
 
 
+_CTRL_CHARS = re.compile(r"[\x00-\x1f\x7f]")  # strips all ASCII control chars incl. \r \n \t
+
+
+def _sanitize(value: str) -> str:
+    """Strip control characters that Playwright could emit as keystrokes.
+    Preserves normal whitespace (space, tab in URLs, newline in multi-line fields is
+    handled by Playwright .fill() which replaces the field value atomically anyway).
+    """
+    return _CTRL_CHARS.sub("", (value or "")).strip()
+
+
 def load_applicant_profile() -> Dict:
     """
     Load personal details used to fill application forms.
     Read from env vars — never stored in DB.
+    All fields are sanitized to prevent control-character injection via Playwright.
 
     Required env vars:
       APPLY_FIRST_NAME, APPLY_LAST_NAME, APPLY_EMAIL
     Optional:
       APPLY_PHONE, APPLY_LINKEDIN, APPLY_GITHUB, APPLY_PORTFOLIO, APPLY_LOCATION
     """
+    fn = _sanitize(os.getenv("APPLY_FIRST_NAME", ""))
+    ln = _sanitize(os.getenv("APPLY_LAST_NAME", ""))
     return {
-        "first_name":    os.getenv("APPLY_FIRST_NAME", ""),
-        "last_name":     os.getenv("APPLY_LAST_NAME", ""),
-        "full_name":     f"{os.getenv('APPLY_FIRST_NAME', '')} {os.getenv('APPLY_LAST_NAME', '')}".strip(),
-        "email":         os.getenv("APPLY_EMAIL", ""),
-        "phone":         os.getenv("APPLY_PHONE", ""),
-        "linkedin_url":  os.getenv("APPLY_LINKEDIN", ""),
-        "github_url":    os.getenv("APPLY_GITHUB", ""),
-        "portfolio_url": os.getenv("APPLY_PORTFOLIO", ""),
-        "location":      os.getenv("APPLY_LOCATION", "Remote"),
+        "first_name":    fn,
+        "last_name":     ln,
+        "full_name":     f"{fn} {ln}".strip(),
+        "email":         _sanitize(os.getenv("APPLY_EMAIL", "")),
+        "phone":         _sanitize(os.getenv("APPLY_PHONE", "")),
+        "linkedin_url":  _sanitize(os.getenv("APPLY_LINKEDIN", "")),
+        "github_url":    _sanitize(os.getenv("APPLY_GITHUB", "")),
+        "portfolio_url": _sanitize(os.getenv("APPLY_PORTFOLIO", "")),
+        "location":      _sanitize(os.getenv("APPLY_LOCATION", "Remote")),
     }
 
 

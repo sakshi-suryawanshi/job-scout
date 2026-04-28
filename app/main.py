@@ -88,24 +88,24 @@ quota    = load_quota()
 
 # ── Funnel metrics — two rows of 4 so labels don't truncate ───────────────────
 st.subheader("Job Hunt Funnel")
-# Row 1: inventory (pipeline inputs)
+# Row 1: inventory (pipeline inputs) — all-time counts via DB count helpers
 inv_cols = st.columns(4)
-for col, (label, val) in zip(inv_cols, [
-    ("🏢 Companies",   funnel.get("companies", 0)),
-    ("📥 Discovered",  funnel.get("jobs", 0)),
-    ("🤖 Scored",      funnel.get("scored", 0)),
-    ("⭐ Recommended", funnel.get("recommended", 0)),
+for col, (label, val, tip) in zip(inv_cols, [
+    ("🏢 Companies",   funnel.get("companies",   0), "Active companies in DB"),
+    ("📥 Discovered",  funnel.get("jobs",         0), "All jobs ever scraped"),
+    ("🤖 Scored",      funnel.get("scored",       0), "Jobs with match_score > 0"),
+    ("⭐ Recommended", funnel.get("recommended",  0), "Jobs with match_score ≥ 70"),
 ]):
-    col.metric(label, val)
-# Row 2: pipeline outcomes
+    col.metric(label, val, help=tip)
+# Row 2: pipeline outcomes — from fetched rows (actioned jobs only)
 pipe_cols = st.columns(4)
-for col, (label, val) in zip(pipe_cols, [
-    ("💾 Saved",       funnel.get("saved", 0)),
-    ("✅ Applied",     funnel.get("applied", 0)),
-    ("💬 Responses",   funnel.get("responded", 0)),
-    ("🎯 Interviews",  funnel.get("interviews", 0)),
+for col, (label, val, tip) in zip(pipe_cols, [
+    ("💾 Saved",       funnel.get("saved",       0), "Manually saved for later"),
+    ("✅ Applied",     funnel.get("applied",     0), "Applied (any method)"),
+    ("💬 Responses",  funnel.get("responded",   0), "Got a reply"),
+    ("🎯 Interviews",  funnel.get("interviews",  0), "Interview scheduled"),
 ]):
-    col.metric(label, val)
+    col.metric(label, val, help=tip)
 
 applied  = funnel.get("applied", 0)
 goal     = 1000

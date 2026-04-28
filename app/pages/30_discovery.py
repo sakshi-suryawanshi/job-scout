@@ -41,12 +41,14 @@ def _load_prefs():
         return {}
 
 
-def _save_prefs(criteria: dict):
-    """Persist criteria back to user_profile.preferences so the form pre-fills next session."""
+def _save_prefs(criteria: dict) -> bool:
+    """Persist criteria back to user_profile.preferences so the form pre-fills next session.
+    Returns True on success, False on any DB error.
+    """
     try:
         result = db._request("GET", "user_profile", params={"limit": 1})
         if not result:
-            return
+            return False
         prefs_update = {
             "title_keywords": criteria.get("title_keywords", []),
             "skills": criteria.get("required_skills", []),
@@ -58,8 +60,10 @@ def _save_prefs(criteria: dict):
         }
         db._request("PATCH", f"user_profile?id=eq.{result[0]['id']}",
                     json={"preferences": prefs_update})
+        return True
     except Exception as _e:
         print(f"_save_prefs: {_e}")
+        return False
 
 def _criteria_form(key_prefix: str):
     prefs = _load_prefs()
@@ -105,8 +109,10 @@ with tab_scrape:
 
     # Explicit save button visible regardless of which action the user takes
     if st.button("💾 Save as default preferences", key="save_prefs_explicit"):
-        _save_prefs(criteria)
-        st.success("Preferences saved — they'll pre-fill this form on next visit.")
+        if _save_prefs(criteria):
+            st.success("Preferences saved — they'll pre-fill this form on next visit.")
+        else:
+            st.warning("Could not save preferences — check your DB connection.")
 
     st.divider()
     st.write("**Sources**")
@@ -161,7 +167,7 @@ with tab_scrape:
     st.write(f"**{total} sources selected**")
 
     if st.button("🚀 Start Scraping", use_container_width=True, type="primary", disabled=total == 0):
-        _save_prefs(criteria)   # Auto-save criteria so next session pre-fills correctly
+        _save_prefs(criteria)   # Auto-save; errors are non-fatal (just logged to stdout)
         from job_scout.scraping.ats import scrape_ats_jobs
         from job_scout.scraping.boards import scrape_board_jobs
         from job_scout.scraping.careers import scrape_career_pages
