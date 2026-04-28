@@ -33,12 +33,12 @@ def _score_badge(score):
     if score >  0:   return f"🔴 {score}"
     return ""
 
-def _action_buttons(job_id, job, db):
-    if st.button("💾 Save",    key=f"sv_{job_id}", use_container_width=True):
+def _action_buttons(job_id, job, db, key_prefix="jc"):
+    if st.button("💾 Save",    key=f"{key_prefix}_sv_{job_id}", use_container_width=True):
         db.mark_job_action(job_id, "saved");    st.rerun()
-    if st.button("✅ Applied", key=f"ap_{job_id}", use_container_width=True):
+    if st.button("✅ Applied", key=f"{key_prefix}_ap_{job_id}", use_container_width=True):
         db.mark_job_applied(job_id);            st.rerun()
-    if st.button("❌ Skip",    key=f"sk_{job_id}", use_container_width=True):
+    if st.button("❌ Skip",    key=f"{key_prefix}_sk_{job_id}", use_container_width=True):
         db.mark_job_action(job_id, "rejected"); st.rerun()
     action = job.get("user_action", "")
     if action:
@@ -98,11 +98,11 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
 
         with right:
             if show_actions and job_id:
-                _action_buttons(job_id, job, db)
+                _action_buttons(job_id, job, db, key_prefix=key_prefix)
 
                 # Tailored resume
                 key = _gemini_key()
-                if st.button("📄 Tailor Resume", key=f"tr_{job_id}", use_container_width=True,
+                if st.button("📄 Tailor Resume", key=f"{key_prefix}_tr_{job_id}", use_container_width=True,
                              disabled=not key, help="Set GEMINI_API_KEY to enable"):
                     base = _resume_text()
                     if not base.strip():
@@ -132,13 +132,13 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
             cname = st.session_state.get(f"company_{job_id}", company_name)
             st.divider()
             st.markdown("**Tailored Resume**")
-            st.text_area("Edit or copy:", value=t, height=350, key=f"ta_{job_id}")
+            st.text_area("Edit or copy:", value=t, height=350, key=f"{key_prefix}_ta_{job_id}")
             dc1, dc2 = st.columns(2)
             with dc1:
-                st.download_button("📥 .txt", t, f"resume_{cname}.txt", key=f"dl_t_{job_id}")
+                st.download_button("📥 .txt", t, f"resume_{cname}.txt", key=f"{key_prefix}_dl_t_{job_id}")
             with dc2:
                 st.download_button("📥 .html (→ PDF)", generate_resume_html(t, title, cname),
-                                   f"resume_{cname}.html", mime="text/html", key=f"dl_h_{job_id}")
+                                   f"resume_{cname}.html", mime="text/html", key=f"{key_prefix}_dl_h_{job_id}")
 
 
 # ── Page ─────────────────────────────────────────────────────────────────────
