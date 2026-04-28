@@ -209,8 +209,8 @@ def stage_score(db, config: Dict = None) -> Dict:
             if usage["remaining"] < 100:
                 print(f"  Gemini quota low ({usage['remaining']} left) — rule-based only")
                 use_ai = False
-        except Exception:
-            pass
+        except Exception as _quota_err:
+            print(f"  Gemini quota check failed ({_quota_err}) — proceeding without guard")
 
     try:
         from job_scout.ai.gemini import score_all_jobs
@@ -254,8 +254,8 @@ def stage_auto_apply(db, config: Dict = None) -> Dict:
     try:
         result = db._request("GET", "user_profile", params={"limit": 1})
         resume_text = (result[0].get("resume_text", "") or "") if result else ""
-    except Exception:
-        pass
+    except Exception as _profile_err:
+        print(f"  AUTO-APPLY: resume load failed — {_profile_err}")
 
     if not resume_text.strip():
         print("  AUTO-APPLY skipped: no resume in profile (Profile → Resume)")
@@ -350,18 +350,42 @@ def stage_digest(db, run_stats: Dict, config: Dict = None) -> Dict:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_criteria(db, config: Dict) -> Dict:
-    """Load scoring/filter criteria from user profile preferences, with fallback defaults."""
+    """Load scoring/filter criteria from user profile preferences, with fallback defaults.
+
+    Priority:
+      1. config["criteria"] (caller-supplied, e.g. from schedule_config.json)
+      2. user_profile.preferences dict  (Tab 2: manually configured search criteria)
+      3. user_profile.skills column     (Tab 1: AI-extracted skills — used only when pref skills empty)
+      4. hard-coded defaults
+    """
+    import json as _json
     prefs = config.get("criteria") or {}
+    profile = {}
     if not prefs:
         try:
             result = db._request("GET", "user_profile", params={"limit": 1})
-            prefs = ((result[0].get("preferences") or {}) if result else {})
-            prefs = prefs if isinstance(prefs, dict) else {}
-        except Exception:
-            pass
+            if result:
+                profile = result[0]
+                prefs = profile.get("preferences") or {}
+                prefs = prefs if isinstance(prefs, dict) else {}
+        except Exception as _e:
+            print(f"  _load_criteria: could not load user profile — {_e}")
+
+    # If preferences.skills is not set, fall back to the AI-extracted skills column
+    skills = prefs.get("skills", [])
+    if not skills and profile:
+        raw = profile.get("skills", "[]")
+        if isinstance(raw, str):
+            try:
+                skills = _json.loads(raw)
+            except Exception:
+                skills = []
+        elif isinstance(raw, list):
+            skills = raw
+
     return {
         "title_keywords": prefs.get("title_keywords", ["backend", "developer", "engineer", "python", "golang"]),
-        "required_skills": prefs.get("skills", []),
+        "required_skills": skills,
         "exclude_keywords": prefs.get("exclude_keywords", ["staff", "principal", "director", "vp"]),
         "remote_only": prefs.get("remote_only", True),
         "global_remote_only": prefs.get("global_remote", True),
@@ -375,7 +399,7 @@ def _build_subject(run_stats: Dict) -> str:
     scrape = run_stats.get("scrape", {})
     auto_apply = run_stats.get("auto_apply", {})
     new = scrape.get("jobs_new", 0)
-    applied = auto_apply.get("would_apply", 0)
+    applied = auto_apply.get("applied", 0)
     attention = auto_apply.get("needs_attention", 0)
     today = date.today().strftime("%B %-d")
     return f"Job Scout Daily — {new} new, {applied} applied, {attention} need you ({today})"

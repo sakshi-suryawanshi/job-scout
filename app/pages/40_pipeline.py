@@ -179,14 +179,19 @@ The full 8-stage pipeline:
 
     c1, c2 = st.columns(2)
     with c1:
-        run_discover = st.checkbox("Stage 1: Discovery (YC, alternatives)", value=True)
-        run_scrape = st.checkbox("Stage 2: Scrape jobs (ATS + boards)", value=True)
-        run_score = st.checkbox("Stage 4: Score new jobs", value=True)
+        st.write("**Stages to run:**")
+        run_discover    = st.checkbox("Stage 1: Discover companies (YC, GitHub lists, Serper)", value=True)
+        run_scrape      = st.checkbox("Stage 2: Scrape jobs (ATS + 40 boards)", value=True)
+        run_enrich      = st.checkbox("Stage 3: Enrich — desperation scoring", value=True)
+        run_classify    = st.checkbox("Stage 4: Classify — startup / YC / hidden_gem", value=True)
+        run_score       = st.checkbox("Stage 5: Score — rule-based + Gemini AI", value=True)
     with c2:
+        run_auto_apply  = st.checkbox("Stage 6: Auto-apply (Playwright tier 1 + semi-auto)", value=False)
+        run_followups   = st.checkbox("Stage 7: Follow-ups — flag overdue applications", value=True)
+        run_digest      = st.checkbox("Stage 8: Email digest", value=True)
+        st.divider()
         max_scrape = st.slider("Max companies per ATS scraper", 20, 200, 50)
         use_ai = st.checkbox("Use Gemini AI for scoring (uses quota)", value=True)
-
-    st.info("⚙️ Auto-apply (Stage 6) is coming in a later V2 phase. For now, use Jobs → Apply Queue.")
 
     if st.button("▶ Run Pipeline Now", type="primary", use_container_width=True):
         import os
@@ -207,23 +212,35 @@ The full 8-stage pipeline:
         cfg["use_ai"] = use_ai
 
         selected_stages = []
-        if run_discover: selected_stages.extend([1])
-        if run_scrape:   selected_stages.extend([2, 3, 4])
-        if run_score:    selected_stages.append(5)
-        selected_stages.extend([6, 7, 8])
+        if run_discover:   selected_stages.append(1)
+        if run_scrape:     selected_stages.append(2)
+        if run_enrich:     selected_stages.append(3)
+        if run_classify:   selected_stages.append(4)
+        if run_score:      selected_stages.append(5)
+        if run_auto_apply: selected_stages.append(6)
+        if run_followups:  selected_stages.append(7)
+        if run_digest:     selected_stages.append(8)
 
-        progress_bar = st.progress(0)
+        if not selected_stages:
+            st.warning("Select at least one stage to run.")
+            st.stop()
+
+        progress_bar = st.progress(0.0, text="Starting pipeline…")
         status_el = st.empty()
 
-        status_el.write("**Running pipeline...**")
+        def _on_progress(fraction: float, message: str):
+            progress_bar.progress(min(fraction, 1.0), text=message)
+            status_el.write(f"**{message}**")
+
         try:
             run_stats = run_pipeline(
                 db=db,
                 stages=selected_stages,
                 config=cfg,
                 triggered_by="manual",
+                progress_callback=_on_progress,
             )
-            progress_bar.progress(1.0)
+            progress_bar.progress(1.0, text="Pipeline complete!")
             status_el.write("**Pipeline complete!**")
             st.success(f"Done! Status: {run_stats.get('_status', 'unknown')}")
             for stage, stats in run_stats.items():
@@ -240,7 +257,7 @@ The full 8-stage pipeline:
 # ── Tab: Auto-Apply Rules ─────────────────────────────────────────────────────
 with tab_rules:
     st.subheader("Auto-Apply Rules")
-    st.caption("Define conditions under which jobs are automatically applied to. (Auto-apply execution is Phase 6 of V2.)")
+    st.caption("Rules are evaluated during Stage 6. Jobs that match are auto-applied via Playwright (Greenhouse/Lever/Ashby) or queued for semi-auto.")
 
     rules = load_rules()
     if rules:

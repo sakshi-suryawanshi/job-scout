@@ -78,6 +78,7 @@ def run_pipeline(
     stages: Optional[List[int]] = None,
     config: Optional[Dict] = None,
     triggered_by: str = "schedule",
+    progress_callback=None,
 ) -> Dict:
     """
     Execute the full 8-stage pipeline (or a subset).
@@ -130,6 +131,19 @@ def run_pipeline(
     run_stats: Dict = {}
     pipeline_status = "success"
 
+    # Count runnable stages (excluding digest which runs last)
+    runnable = [s for s in sorted(stages) if s in stage_map]
+    total_stages = len(runnable) + (1 if 8 in stages else 0)
+    done = 0
+
+    def _report(fraction: float, message: str):
+        print(f"  [{int(fraction*100):3d}%] {message}")
+        if progress_callback:
+            try:
+                progress_callback(fraction, message)
+            except Exception:
+                pass
+
     for stage_num in sorted(stages):
         if stage_num == 8:
             continue  # Digest runs last, after all other stages
@@ -138,6 +152,7 @@ def run_pipeline(
             continue
 
         name, fn = stage_map[stage_num]
+        _report(done / max(total_stages, 1), f"Stage {stage_num}: {name.replace('_', ' ').title()}…")
         print(f"\n── Stage {stage_num}: {name.upper()} ──")
         try:
             result = fn(db, config)
@@ -152,9 +167,11 @@ def run_pipeline(
             pipeline_status = "partial"
             if run_id:
                 add_stage_result(run_id, name, "failed", None, str(e))
+        done += 1
 
     # Stage 8: Digest (always last)
     if 8 in stages:
+        _report(done / max(total_stages, 1), "Stage 8: Digest…")
         print("\n── Stage 8: DIGEST ──")
         try:
             digest_result = stage_digest(db, run_stats, config)

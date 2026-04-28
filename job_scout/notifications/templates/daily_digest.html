@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Scout Daily — {{date}}</title>
+<style>
+  body{font-family:Georgia,serif;font-size:13pt;line-height:1.6;max-width:640px;margin:32px auto;color:#222;padding:0 16px}
+  h1{margin-top:0;color:#111}
+  h2{color:#333;border-bottom:2px solid #eee;padding-bottom:4px}
+  table{border-collapse:collapse;width:100%}
+  td{padding:4px 8px}
+  td:first-child{color:#555}
+  td:last-child{text-align:right}
+  ul{padding-left:20px}
+  li{margin:4px 0}
+  a{color:#0066cc}
+  .meta{font-size:11pt;color:#888;margin-bottom:4px}
+  .footer{font-size:9pt;color:#aaa;border-top:1px solid #eee;margin-top:32px;padding-top:8px}
+  .warn{color:#e65c00}
+</style>
+</head>
+<body>
+
+<p class="meta">Job Scout Daily Digest</p>
+<h1>{{date}}</h1>
+
+<!-- PIPELINE SUMMARY -->
+{{#pipeline_rows}}
+<h2>📊 Pipeline</h2>
+<table>
+  {{pipeline_rows}}
+</table>
+{{/pipeline_rows}}
+
+<!-- TOP NEW RECOMMENDED -->
+{{#top_new}}
+<h2>⭐ Top New Recommended</h2>
+<ul>
+  {{top_new}}
+</ul>
+{{/top_new}}
+
+<!-- NEEDS ATTENTION -->
+{{#needs_attention}}
+<h2 class="warn">⚠️ Needs Your Attention ({{needs_attention_count}})</h2>
+<p style="color:#666">These jobs matched your rules but need manual apply (non-Greenhouse/Lever/Ashby ATS).
+Check <strong>Jobs → Apply Queue</strong>.</p>
+{{/needs_attention}}
+
+<!-- FOLLOW-UPS DUE -->
+{{#follow_ups}}
+<h2>🔔 Follow-Ups Due ({{follow_up_count}})</h2>
+<ul>
+  {{follow_ups}}
+</ul>
+{{/follow_ups}}
+
+<!-- PROGRESS -->
+<h2>📈 Progress</h2>
+<table>
+  <tr><td>Total applied</td><td><b>{{total_applied}}</b> / 1000 ({{pct_applied}}%)</td></tr>
+  <tr><td>Response rate</td><td><b>{{resp_rate}}</b></td></tr>
+  <tr><td>Interview rate</td><td><b>{{int_rate}}</b></td></tr>
+</table>
+
+<div class="footer">
+  Sent by Job Scout V2 &middot; <a href="https://github.com/sakshi-suryawanshi/job-scout">GitHub</a>
+</div>
+
+</body>
+</html>

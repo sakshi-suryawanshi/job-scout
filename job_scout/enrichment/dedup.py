@@ -83,10 +83,10 @@ def is_globally_remote(job: Dict) -> bool:
         return True
 
     loc_lower = location.lower().strip()
-    if job.get("is_remote") and loc_lower in ("", "remote", "remote job", "unknown"):
-        return True
+    # Blank or totally generic location — trust the is_remote flag
+    if loc_lower in ("", "remote", "remote job", "unknown", "anywhere"):
+        return bool(job.get("is_remote"))
 
-    if job.get("is_remote"):
-        return True
-
+    # Location is specific (city, country, "Remote - New York", etc.)
+    # Only accept if GLOBAL_ACCEPT explicitly matched above; don't blindly trust is_remote.
     return False

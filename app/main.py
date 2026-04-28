@@ -9,13 +9,15 @@ st.set_page_config(
 )
 
 # Load secrets into env before any DB import
+_REQUIRED_SECRETS = {"SUPABASE_URL", "SUPABASE_KEY"}
 for key in ("SUPABASE_URL", "SUPABASE_KEY", "GEMINI_API_KEY", "SERPER_API_KEY"):
     try:
         val = st.secrets.get(key)
         if val:
             os.environ[key] = val
-    except Exception:
-        pass
+    except Exception as _sec_err:
+        if key in _REQUIRED_SECRETS:
+            st.warning(f"Could not load secret {key}: {_sec_err}")
 
 try:
     from db import get_db

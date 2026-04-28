@@ -29,7 +29,8 @@ def build_digest_html(db, run_stats: Dict, config: Dict = None) -> str:
             reverse=True,
         )[:5]
         follow_ups = db.get_follow_ups_due()[:5]
-    except Exception:
+    except Exception as _db_err:
+        print(f"  digest: DB load error — {_db_err}")
         applied = responded = interviews = top_new = follow_ups = []
 
     total_applied = len(applied)
@@ -59,8 +60,8 @@ def build_digest_html(db, run_stats: Dict, config: Dict = None) -> str:
     if score_stats.get("total_scored"):
         avg = score_stats.get("avg_score", 0)
         pipeline_rows.append(f"<tr><td>Jobs scored</td><td><b>{score_stats['total_scored']}</b> (avg {avg})</td></tr>")
-    if auto_stats.get("would_apply"):
-        pipeline_rows.append(f"<tr><td>Queued for auto-apply</td><td><b>{auto_stats['would_apply']}</b></td></tr>")
+    if auto_stats.get("applied"):
+        pipeline_rows.append(f"<tr><td>Auto-applied</td><td><b>{auto_stats['applied']}</b></td></tr>")
     if auto_stats.get("needs_attention"):
         pipeline_rows.append(f"<tr><td>Need your attention</td><td><b>{auto_stats['needs_attention']}</b></td></tr>")
     if follow_stats.get("follow_ups_due"):
