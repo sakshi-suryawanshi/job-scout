@@ -26,6 +26,10 @@ def stage_discover(db, config: Dict = None) -> Dict:
         new = [c for c in companies if (c.get("name") or "").lower() not in existing_names]
         if not new:
             return 0
+        # Tag auto-discovered companies so their origin is auditable
+        for c in new:
+            if not c.get("source"):
+                c["source"] = "auto_daily"
         inserted = db.add_companies_bulk(new)
         print(f"  {label}: {inserted} new companies")
         for c in new:
@@ -89,6 +93,33 @@ def stage_discover(db, config: Dict = None) -> Dict:
         except Exception as e:
             print(f"  Serper error: {e}")
             stats["errors"] += 1
+
+    # Scheduled Career Hunt queries (saved with "Add to daily pipeline" checkbox)
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        _qfile = _Path(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))) / "data" / "custom_queries.json"
+        if _qfile.exists() and os.getenv("SERPER_API_KEY"):
+            queries = _json.loads(_qfile.read_text())
+            scheduled = [q for q in queries if q.get("scheduled")]
+            if scheduled:
+                from job_scout.discovery.serper_dorking import SerperDorker
+                dorker = SerperDorker()
+                for q in scheduled:
+                    excl = "-site:linkedin.com -site:indeed.com -site:greenhouse.io -site:lever.co"
+                    role = q.get("role") or "engineer OR developer"
+                    tech = f'"{q["tech"]}"' if q.get("tech") else ""
+                    query_str = f'intitle:"careers" OR intitle:"jobs" "remote" {role} {tech} {excl}'.strip()
+                    results = dorker.search(query_str, num_results=10)
+                    for r in results:
+                        c = dorker.extract_company_from_generic(
+                            r.get("link", ""), r.get("title", ""), r.get("snippet", "")
+                        )
+                        if c:
+                            _insert_new([dorker.to_db_format(c)], f"scheduled query: {q['label'][:20]}")
+    except Exception as e:
+        print(f"  scheduled career queries error: {e}")
 
     print(f"Stage 1 DISCOVER: {stats}")
     return stats

@@ -19,6 +19,29 @@ def _gemini_key():
         pass
     return key if key and key != "your_gemini_api_key_here" else ""
 
+def _load_browse_prefs():
+    """Load saved Browse Jobs filter state from user_profile.preferences."""
+    try:
+        result = db._request("GET", "user_profile", params={"limit": 1})
+        prefs = (result[0].get("preferences") or {}) if result else {}
+        return prefs.get("browse_filters", {}) if isinstance(prefs, dict) else {}
+    except Exception:
+        return {}
+
+def _save_browse_prefs(status: str, source: str, remote: str, sort: str):
+    """Persist Browse Jobs filter state to user_profile.preferences."""
+    try:
+        result = db._request("GET", "user_profile", params={"limit": 1})
+        if not result:
+            return
+        prefs = result[0].get("preferences") or {}
+        if not isinstance(prefs, dict):
+            prefs = {}
+        prefs["browse_filters"] = {"status": status, "source": source, "remote": remote, "sort": sort}
+        db._request("PATCH", f"user_profile?id=eq.{result[0]['id']}", json={"preferences": prefs})
+    except Exception:
+        pass
+
 def _resume_text():
     try:
         result = db._request("GET", "user_profile", params={"limit": 1})
@@ -224,9 +247,14 @@ with tab_queue:
 with tab_all:
     st.subheader("All Jobs in Database")
 
+    _bprefs = _load_browse_prefs()   # restore last session's filter state
+
     fc1, fc2, fc3, fc4, fc5 = st.columns(5)
     with fc1:
-        f_status = st.selectbox("Status", ["All", "New Only", "Saved", "Applied", "Rejected"], key="all_status")
+        _status_opts = ["All", "New Only", "Saved", "Applied", "Rejected"]
+        f_status = st.selectbox("Status", _status_opts, key="all_status",
+                                index=_status_opts.index(_bprefs.get("status", "All"))
+                                      if _bprefs.get("status") in _status_opts else 0)
     with fc2:
         # Build source list dynamically from DB
         try:
@@ -235,13 +263,25 @@ with tab_all:
         except Exception:
             srcs = []
             all_j = []
-        f_source = st.selectbox("Source", ["All"] + srcs, key="all_source")
+        _src_opts = ["All"] + srcs
+        _saved_src = _bprefs.get("source", "All")
+        f_source = st.selectbox("Source", _src_opts, key="all_source",
+                                index=_src_opts.index(_saved_src) if _saved_src in _src_opts else 0)
     with fc3:
-        f_remote = st.selectbox("Location", ["All", "Remote Only"], key="all_remote")
+        _rem_opts = ["All", "Remote Only"]
+        f_remote = st.selectbox("Location", _rem_opts, key="all_remote",
+                                index=_rem_opts.index(_bprefs.get("remote", "All"))
+                                      if _bprefs.get("remote") in _rem_opts else 0)
     with fc4:
         search = st.text_input("Search title", key="all_search")
     with fc5:
-        sort_all = st.selectbox("Sort by", ["Score ↓", "Score ↑", "Newest", "Desperation ↓"], key="all_sort")
+        _sort_opts = ["Score ↓", "Score ↑", "Newest", "Desperation ↓"]
+        sort_all = st.selectbox("Sort by", _sort_opts, key="all_sort",
+                                index=_sort_opts.index(_bprefs.get("sort", "Score ↓"))
+                                      if _bprefs.get("sort") in _sort_opts else 0)
+
+    # Auto-save filter state so it restores on next visit
+    _save_browse_prefs(f_status, f_source, f_remote, sort_all)
 
     jobs = all_j if all_j else []
     if f_status == "New Only":  jobs = [j for j in jobs if j.get("is_new")]

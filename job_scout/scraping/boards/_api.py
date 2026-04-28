@@ -1,22 +1,81 @@
 # job_scout/scraping/boards/_api.py
 """JSON API-based job board scrapers."""
 
+import json
+import os
 import httpx
-from typing import List, Dict
+from pathlib import Path
+from typing import List, Dict, Optional
 from job_scout.scraping.base import clean_html, is_remote
+
+_CACHE_FILE = Path(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)
+    )))),
+    "data", "api_scrape_cache.json",
+)
+
+
+def _load_api_cache() -> dict:
+    try:
+        return json.loads(_CACHE_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_api_cache(cache: dict):
+    try:
+        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    except Exception:
+        pass
+
+
+def _cached_get(url: str, params: dict = None, headers: dict = None) -> Optional[httpx.Response]:
+    """GET with ETag/Last-Modified caching. Returns None on 304 (unchanged)."""
+    cache = _load_api_cache()
+    cache_key = url + (str(sorted((params or {}).items())))
+    cached = cache.get(cache_key, {})
+
+    req_headers = {**(headers or {}), "User-Agent": "JobScout/1.0"}
+    if cached.get("etag"):
+        req_headers["If-None-Match"] = cached["etag"]
+    if cached.get("last_modified"):
+        req_headers["If-Modified-Since"] = cached["last_modified"]
+
+    client = httpx.Client(timeout=30, headers=req_headers)
+    resp = client.get(url, params=params)
+
+    if resp.status_code == 304:
+        return None  # unchanged
+
+    resp.raise_for_status()
+    # Update cache metadata
+    new_cached = {}
+    if resp.headers.get("ETag"):
+        new_cached["etag"] = resp.headers["ETag"]
+    if resp.headers.get("Last-Modified"):
+        new_cached["last_modified"] = resp.headers["Last-Modified"]
+    if new_cached:
+        cache[cache_key] = new_cached
+        _save_api_cache(cache)
+    return resp
 
 
 class RemoteOKScraper:
     def get_jobs(self, tags: List[str] = None) -> List[Dict]:
         """Fetch from RemoteOK. Pass tags for server-side filtering (e.g. ["python", "backend"]).
         Tags must be lowercase; RemoteOK tag matching is case-sensitive.
+        Returns [] on 304 Not Modified (board unchanged since last fetch).
         """
         try:
-            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
             params = {}
             if tags:
                 params["tags"] = ",".join(t.lower() for t in tags)
-            data = client.get("https://remoteok.com/api", params=params).json()
+            resp = _cached_get("https://remoteok.com/api", params=params)
+            if resp is None:
+                return []   # 304 — nothing new
+            data = resp.json()
             return [
                 {
                     "title": i.get("position", ""),
@@ -38,13 +97,23 @@ class RemoteOKScraper:
 
 
 class RemotiveScraper:
-    def get_jobs(self, category: str = None, limit: int = 200) -> List[Dict]:
+    def get_jobs(self, category: str = None, limit: int = 200, search: str = None) -> List[Dict]:
+        """
+        Fetch from Remotive.
+        category: filter by job category (e.g. 'software-dev')
+        search:   server-side keyword filter (free-text against title+description)
+        Returns [] on 304 Not Modified.
+        """
         try:
-            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
             params = {"limit": limit}
             if category:
                 params["category"] = category
-            data = client.get("https://remotive.com/api/remote-jobs", params=params).json()
+            if search:
+                params["search"] = search
+            resp = _cached_get("https://remotive.com/api/remote-jobs", params=params)
+            if resp is None:
+                return []   # 304
+            data = resp.json()
             return [
                 {
                     "title": i.get("title", ""),
@@ -225,10 +294,20 @@ class WFHioScraper:
 
 
 class DevITJobsScraper:
-    def get_jobs(self, limit: int = 100) -> List[Dict]:
+    def get_jobs(self, limit: int = 100, skills: List[str] = None) -> List[Dict]:
+        """
+        Fetch from DevITjobs EU.
+        skills: server-side skill filter list (e.g. ["Python", "Go"])
+        """
         try:
-            client = httpx.Client(timeout=30, headers={"User-Agent": "JobScout/1.0"})
-            data = client.get("https://devitjobs.eu/api/JobOffers/short").json()
+            params = {}
+            if skills:
+                # DevITjobs accepts ?skills=Python&skills=Go (repeated param)
+                params["skills"] = skills
+            resp = _cached_get("https://devitjobs.eu/api/JobOffers/short", params=params)
+            if resp is None:
+                return []   # 304
+            data = resp.json()
             jobs = []
             for i in (data if isinstance(data, list) else data.get("data", []))[:limit]:
                 sal_min = i.get("salaryFrom") or i.get("salary_min")

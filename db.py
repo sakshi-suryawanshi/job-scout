@@ -225,6 +225,24 @@ class Database:
         if fingerprint:
             existing = self.get_job_by_fingerprint(fingerprint)
             if existing:
+                # apply_url tiebreaker: if two listings for the same role have DIFFERENT
+                # apply_urls and were posted more than 14 days apart, treat as a re-post
+                # (the role was re-listed) and let it through as a new entry.
+                new_url   = (job.get("apply_url") or "").strip()
+                exist_url = (existing.get("apply_url") or "").strip()
+                if new_url and exist_url and new_url != exist_url:
+                    from datetime import datetime, timedelta
+                    _cutoff = datetime.now() - timedelta(days=14)
+                    _disc = str(existing.get("discovered_at") or existing.get("discovered_date") or "")[:10]
+                    try:
+                        _age = datetime.fromisoformat(_disc) if _disc else _cutoff
+                    except ValueError:
+                        _age = _cutoff
+                    if _age < _cutoff:
+                        # Re-post: different URL, older than 14 days → treat as new listing
+                        job["fingerprint"] = fingerprint + "_repost"
+                        return self.add_job(job)
+
                 # Merge source_boards
                 new_source = job.get("source_board", "")
                 existing_boards = existing.get("source_boards", "") or ""
@@ -267,9 +285,10 @@ class Database:
         if filters.get("min_score"):
             params["match_score"] = f"gte.{filters['min_score']}"
         
-        # Default: only jobs discovered in last 6 months. Pass days=0 to disable.
+        # Default: only jobs discovered in last 90 days (jobs older than that are almost always filled).
+        # Pass days=0 to disable the filter and return all-time jobs.
         from datetime import datetime, timedelta
-        days = filters.get("days", 180)
+        days = filters.get("days", 90)
         if days and days > 0:
             cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             params["discovered_date"] = f"gte.{cutoff}"

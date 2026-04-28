@@ -123,6 +123,8 @@ with tab_scrape:
         ats_gh  = st.checkbox("Greenhouse (~80 cos)", value=True,  key="sc_ats_gh")
         ats_lv  = st.checkbox("Lever (~15 cos)",      value=True,  key="sc_ats_lv")
         ats_ash = st.checkbox("Ashby (~60 cos)",      value=True,  key="sc_ats_ash")
+        ats_wb  = st.checkbox("Workable",             value=False, key="sc_ats_wb")
+        ats_sr  = st.checkbox("SmartRecruiters",      value=False, key="sc_ats_sr")
         max_slugs = st.slider("Max companies per ATS", 10, 200, 50, key="sc_max_slugs")
 
     with sc2:
@@ -160,7 +162,10 @@ with tab_scrape:
     career_pages = st.checkbox("Scrape career pages of DB companies (slow)", value=False)
     max_cp = st.slider("Max career pages", 10, 100, 30) if career_pages else 30
 
-    ats_types = [a for a, c in [("greenhouse", ats_gh), ("lever", ats_lv), ("ashby", ats_ash)] if c]
+    ats_types = [a for a, c in [
+        ("greenhouse", ats_gh), ("lever", ats_lv), ("ashby", ats_ash),
+        ("workable", ats_wb), ("smartrecruiters", ats_sr),
+    ] if c]
     boards = [k for k, v in board_checks.items() if v]
     total = len(ats_types) + len(boards) + (1 if career_pages else 0)
 
@@ -263,11 +268,11 @@ with tab_daily:
         cats = (["linkedin_daily"] if run_li else []) + (["indeed_daily"] if run_in else [])
 
         if st.button("⚡ Run Daily Discovery", type="primary", use_container_width=True, disabled=not cats):
-            from job_scout.discovery.serper_dorking import SerperDorker
+            from job_scout.discovery.serper_dorking import SerperDorker, create_signal_from_result
             with st.spinner("Running…"):
                 try:
                     dorker = SerperDorker()
-                    total_companies = 0
+                    total_companies, sig_count = 0, 0
                     for cat in cats:
                         companies_found = dorker.run_dork_category(cat, results_per_query=results_per_q, force=force_d)
                         db_companies = [dorker.to_db_format(c) for c in companies_found]
@@ -275,10 +280,22 @@ with tab_daily:
                         new_cos = [c for c in db_companies if (c.get("name") or "").lower() not in existing]
                         if new_cos:
                             total_companies += db.add_companies_bulk(new_cos)
+                        # Auto-save signals from Daily Discovery (item 17)
+                        for company in companies_found:
+                            src_cat = company.get("source_category", "")
+                            if src_cat in {"distress", "funding", "hidden", "regional"}:
+                                try:
+                                    sig = create_signal_from_result(company, src_cat)
+                                    if db.add_signal(sig):
+                                        sig_count += 1
+                                except Exception:
+                                    pass
+                    msg = f"Added **{total_companies}** new companies from LinkedIn/Indeed"
+                    if sig_count:
+                        msg += f" + **{sig_count}** signals saved"
                     st.success(
-                        f"Added **{total_companies}** new companies from LinkedIn/Indeed. "
-                        "Their job listings will be scraped automatically in the next pipeline run "
-                        "(or use the **Scrape Jobs** tab to pull them now)."
+                        msg + ". Job listings will be scraped in the next pipeline run "
+                        "(or use the **Scrape Jobs** tab now)."
                     )
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -470,10 +487,10 @@ with tab_hunt:
             except Exception:
                 return []
 
-        def _save_query(label: str, tech: str, role: str, extra: str):
+        def _save_query(label: str, tech: str, role: str, extra: str, scheduled: bool = False):
             queries = _load_queries()
             queries = [q for q in queries if q.get("label") != label]  # replace if exists
-            queries.append({"label": label, "tech": tech, "role": role, "extra": extra})
+            queries.append({"label": label, "tech": tech, "role": role, "extra": extra, "scheduled": scheduled})
             _QFILE.parent.mkdir(parents=True, exist_ok=True)
             _QFILE.write_text(_json.dumps(queries, indent=2))
 
@@ -500,14 +517,21 @@ with tab_hunt:
 
         with st.expander("💾 Save current query"):
             q_label = st.text_input("Query name", placeholder="Python backend remote seed", key="hunt_qlabel")
+            q_scheduled = st.checkbox(
+                "Add to daily pipeline (runs with Stage 1 every morning)",
+                value=False, key="hunt_qsched",
+                help="When checked, this query runs automatically each day as part of the scheduled pipeline.",
+            )
             if st.button("Save", key="hunt_save_btn") and q_label:
                 _save_query(
                     q_label,
                     st.session_state.get("hunt_tech", ""),
                     st.session_state.get("hunt_role", ""),
                     st.session_state.get("hunt_extra", ""),
+                    scheduled=q_scheduled,
                 )
-                st.success(f"Saved query: **{q_label}**")
+                sched_note = " (added to daily pipeline)" if q_scheduled else ""
+                st.success(f"Saved query: **{q_label}**{sched_note}")
                 st.rerun()
 
 

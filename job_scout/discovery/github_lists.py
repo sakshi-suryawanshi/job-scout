@@ -11,6 +11,30 @@ from typing import List, Dict
 
 _README_URL = "https://raw.githubusercontent.com/remoteintech/remote-jobs/main/README.md"
 
+# Map URL pattern → (ats_type, career_url_template using slug)
+_ATS_PATTERNS = [
+    (r"boards\.greenhouse\.io/([^/\?#]+)", "greenhouse", "https://boards.greenhouse.io/{slug}"),
+    (r"jobs\.lever\.co/([^/\?#]+)",         "lever",      "https://jobs.lever.co/{slug}"),
+    (r"jobs\.ashbyhq\.com/([^/\?#]+)",      "ashby",      "https://jobs.ashbyhq.com/{slug}"),
+    (r"apply\.workable\.com/([^/\?#]+)",    "workable",   "https://apply.workable.com/{slug}"),
+    (r"jobs\.smartrecruiters\.com/([^/\?#]+)", "smartrecruiters", "https://jobs.smartrecruiters.com/{slug}"),
+]
+
+
+def detect_ats_from_url(url: str):
+    """
+    Attempt to detect ATS type from a careers URL.
+    Returns (ats_type, career_url) if matched, else (None, None).
+    Best-effort: only works when the company links directly to an ATS job board.
+    """
+    import re
+    for pattern, ats_type, template in _ATS_PATTERNS:
+        m = re.search(pattern, url or "", re.IGNORECASE)
+        if m:
+            slug = m.group(1).rstrip("/")
+            return ats_type, template.format(slug=slug)
+    return None, None
+
 # Only keep entries with one of these region labels
 _GLOBAL_REGIONS = re.compile(
     r"\b(worldwide|global|anywhere|remote|international)\b",
@@ -55,13 +79,17 @@ def fetch_remoteintech(filter_global: bool = True) -> List[Dict]:
             continue
 
         domain = url.replace("https://", "").replace("http://", "").rstrip("/").split("/")[0]
-        career_url = f"https://{domain}/careers"
+        # Best-effort ATS detection from the website URL itself
+        ats_type, ats_career_url = detect_ats_from_url(url)
+        career_url = ats_career_url or f"https://{domain}/careers"
+        if not ats_type:
+            ats_type = "unknown"
 
         companies.append({
             "name": name,
             "website": url,
             "career_url": career_url,
-            "ats_type": "unknown",
+            "ats_type": ats_type,
             "source": "remoteintech_github",
             "is_active": True,
             "priority_score": 7,

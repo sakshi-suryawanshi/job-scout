@@ -85,14 +85,23 @@ with tab_browse:
                 "Priority": c.get("priority_score", 0),
             })
         df = pd.DataFrame(display)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        # Selectable dataframe — click any row to open its edit panel below
+        selection = st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            selection_mode="single-row",
+            on_select="rerun",
+            key="co_table",
+        )
+        selected_rows = selection.selection.get("rows", []) if selection.selection else []
+        sel_id = filtered[selected_rows[0]]["id"] if selected_rows else None
+
+        if not sel_id:
+            st.caption("⬆️ Click a row above to edit or delete that company.")
 
         st.divider()
         st.subheader("Edit or Delete")
-
-        company_names = {f"{c['name']} ({c['id'][:8]})": c["id"] for c in filtered}
-        sel_label = st.selectbox("Select company", list(company_names.keys()))
-        sel_id = company_names.get(sel_label)
 
         if sel_id:
             company = db.get_company_by_id(sel_id)
@@ -163,6 +172,48 @@ with tab_browse:
                                 st.rerun()
     else:
         st.info("No companies found. Add some below!")
+
+    # ── Bulk operations ───────────────────────────────────────────────────────
+    with st.expander("⚡ Bulk Actions"):
+        st.caption("Select multiple companies using the filter above, then apply an action to all of them.")
+        bulk_cols = st.columns(3)
+        bulk_source_f = bulk_cols[0].selectbox(
+            "Apply to source", ["— pick source —"] + list({c.get("source", "") for c in filtered if c.get("source")}),
+            key="bulk_src_f",
+        )
+        bulk_ats_f = bulk_cols[1].selectbox(
+            "…and ATS type", ["— any —"] + list({c.get("ats_type", "") for c in filtered if c.get("ats_type")}),
+            key="bulk_ats_f",
+        )
+        bulk_targets = [
+            c for c in filtered
+            if (bulk_source_f == "— pick source —" or c.get("source") == bulk_source_f)
+            and (bulk_ats_f == "— any —" or c.get("ats_type") == bulk_ats_f)
+        ]
+        st.write(f"**{len(bulk_targets)}** companies match the selection")
+
+        ba1, ba2, ba3 = st.columns(3)
+        if ba1.button("✅ Bulk Activate", use_container_width=True, disabled=not bulk_targets):
+            updated = 0
+            for c in bulk_targets:
+                if db.update_company(c["id"], {"is_active": True}):
+                    updated += 1
+            st.success(f"Activated {updated} companies"); st.rerun()
+
+        if ba2.button("⏸️ Bulk Deactivate", use_container_width=True, disabled=not bulk_targets):
+            updated = 0
+            for c in bulk_targets:
+                if db.update_company(c["id"], {"is_active": False}):
+                    updated += 1
+            st.success(f"Deactivated {updated} companies"); st.rerun()
+
+        new_ats = ba3.selectbox("Re-tag ATS", ["— choose —"] + ATS_OPTIONS, key="bulk_retag")
+        if ba3.button("🔄 Re-tag", use_container_width=True, disabled=new_ats == "— choose —" or not bulk_targets):
+            updated = 0
+            for c in bulk_targets:
+                if db.update_company(c["id"], {"ats_type": new_ats}):
+                    updated += 1
+            st.success(f"Re-tagged {updated} companies as {new_ats!r}"); st.rerun()
 
     # Sidebar stats
     try:
@@ -318,27 +369,16 @@ with tab_discover:
                     st.error(f"Error: {e}")
 
     st.divider()
-    d3, d4 = st.columns(2)
-
-    with d3:
-        st.write("**remoteintech/remote-jobs**")
-        st.caption("700+ curated globally-remote companies from the community-maintained GitHub list.")
-        if st.button("🔄 Sync remoteintech list", use_container_width=True, key="ri_btn"):
-            with st.spinner("Fetching from GitHub…"):
-                try:
-                    from job_scout.discovery.github_lists import import_remoteintech_to_db
-                    result = import_remoteintech_to_db(db)
-                    st.success(
-                        f"✅ Synced: **{result['inserted']}** new companies, "
-                        f"{result['skipped']} already in DB"
-                    )
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-    with d4:
-        st.write("**Product Hunt**")
-        st.info(
-            "⚠️ Product Hunt blocks scrapers (403). "
-            "Use **Discovery → Serper Dorking** with the `job_boards` or `hidden_gems` "
-            "category to find PH-launched startups via Google."
-        )
+    st.write("**remoteintech/remote-jobs**")
+    st.caption("700+ curated globally-remote companies, community-maintained. ATS types are auto-detected where possible.")
+    if st.button("🔄 Sync remoteintech list", use_container_width=True, key="ri_btn"):
+        with st.spinner("Fetching from GitHub…"):
+            try:
+                from job_scout.discovery.github_lists import import_remoteintech_to_db
+                result = import_remoteintech_to_db(db)
+                st.success(
+                    f"✅ Synced: **{result['inserted']}** new companies, "
+                    f"{result.get('new', result.get('inserted', 0))} were new"
+                )
+            except Exception as e:
+                st.error(f"Error: {e}")
