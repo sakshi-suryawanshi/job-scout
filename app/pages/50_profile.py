@@ -51,17 +51,46 @@ def _extract_pdf(file_bytes: bytes) -> str:
 
 
 def _extract_tex(file_bytes: bytes) -> str:
-    """Strip LaTeX markup and return plain text using pylatexenc."""
+    """Strip LaTeX markup and return plain text.
+
+    Primary:  pylatexenc — handles most LaTeX constructs.
+    Fallback: regex stripper — used when pylatexenc crashes on
+              unsupported commands (e.g. \\href with URL arguments).
+    """
+    import re
+    source = file_bytes.decode("utf-8", errors="replace")
+
+    # Pre-process: replace \href{url}{label} → label  (pylatexenc crashes on these)
+    source_clean = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", source)
+    # Also flatten \url{...} → the URL text
+    source_clean = re.sub(r"\\url\{([^}]*)\}", r"\1", source_clean)
+
+    # Primary: pylatexenc
     try:
         from pylatexenc.latex2text import LatexNodes2Text
-        source = file_bytes.decode("utf-8", errors="replace")
-        plain = LatexNodes2Text().latex_to_text(source)
-        import re
+        plain = LatexNodes2Text().latex_to_text(source_clean)
         plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
-        return plain
-    except Exception as e:
-        st.error(f"LaTeX parse error: {e}")
-        return ""
+        if len(plain) > 100:      # sanity check — at least some content
+            return plain
+    except Exception:
+        pass   # fall through to regex stripper
+
+    # Fallback: regex-based LaTeX stripper
+    text = source
+    text = re.sub(r"\\begin\{[^}]+\}|\\end\{[^}]+\}", "", text)   # environments
+    text = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", text)     # \href{url}{label}
+    text = re.sub(r"\\url\{([^}]*)\}", r"\1", text)               # \url{...}
+    text = re.sub(r"\\[a-zA-Z]+\*?\{([^}]*)\}", r"\1", text)      # \cmd{content} → content
+    text = re.sub(r"\\[a-zA-Z]+\*?\s*", " ", text)                # bare \commands
+    text = re.sub(r"[{}]", " ", text)                              # leftover braces
+    text = re.sub(r"%[^\n]*", "", text)                            # % comments
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    if len(text) > 100:
+        return text
+
+    st.error("Could not extract text from the .tex file. Use the plain-text fallback below.")
+    return ""
 
 
 def _save_profile(data: dict, profile_id: str = None):
