@@ -54,15 +54,33 @@ def apply_to_job(
 
     score = int(job.get("match_score") or 0)
 
-    # ── Resume strategy based on score ───────────────────────────────────
-    # ≥ 80: tailor the .tex-extracted text with Gemini for this specific job
-    # 70–79: attach the PDF directly — no tailoring effort on lower scores
+    # ── Resume strategy based on score + remaining Gemini quota ──────────
+    #
+    # Priority 1 (score ≥ 80): always tailor — these are high-confidence jobs
+    #   → Gemini rewrites resume from .tex source for this specific role
+    #   → attach tailored text to ATS form
+    #
+    # Priority 2 (score 70–79): tailor ONLY if Gemini quota is still available
+    #   after processing all ≥80 jobs.  If quota is low, fall back to PDF.
+    #   → attach tailored text when quota allows
+    #   → attach original PDF when quota is running out
     if score >= 80:
         tailored_resume = _tailor_resume_for_job(job, resume_text)
-        use_pdf = False   # attach the Gemini-tailored text
+        use_pdf = False
+
+    elif score >= 70:
+        if _has_gemini_quota(min_remaining=100):
+            # Quota available → upgrade: tailor and submit just like ≥80 jobs
+            tailored_resume = _tailor_resume_for_job(job, resume_text)
+            use_pdf = False
+        else:
+            # Quota low → fall back to original PDF, no tailoring cost
+            tailored_resume = resume_text
+            use_pdf = True
+
     else:
-        tailored_resume = resume_text   # not used for attachment, just for cover letter
-        use_pdf = True    # attach original PDF directly
+        tailored_resume = resume_text
+        use_pdf = True
 
     # ── Generate cover letter (shared across tiers, always uses .tex text) ─
     cover_letter = _generate_cover_letter(job, resume_text)
@@ -116,6 +134,21 @@ def _tailor_resume_for_job(job: Dict, resume_text: str) -> str:
         return tailored or resume_text
     except Exception:
         return resume_text   # graceful degradation — original text still gets submitted
+
+
+def _has_gemini_quota(min_remaining: int = 100) -> bool:
+    """Return True if enough Gemini quota remains to tailor one more resume.
+
+    Reads today's usage from the api_usage table.
+    Falls back to True (assume quota available) if the DB call fails —
+    better to attempt tailoring than to silently downgrade.
+    """
+    try:
+        from job_scout.db.repositories.usage import get_usage_today
+        usage = get_usage_today("gemini")
+        return usage.get("remaining", 9999) >= min_remaining
+    except Exception:
+        return True   # fail-open: try tailoring rather than silently skipping
 
 
 def _generate_cover_letter(job: Dict, resume_text: str) -> str:

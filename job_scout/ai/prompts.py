@@ -55,7 +55,7 @@ JSON:"""
 # ── Resume tailoring ──────────────────────────────────────────────────────────
 
 TAILOR_PROMPT = """\
-You are an expert resume writer. Tailor the candidate's resume for a specific job.
+You are helping tailor a resume for a specific job application.
 
 **Job details:**
 - Title: {job_title}
@@ -68,13 +68,31 @@ You are an expert resume writer. Tailor the candidate's resume for a specific jo
 **Candidate's base resume:**
 {resume_text}
 
-Rewrite the resume tailored to this job. Rules:
-1. Keep ALL facts true — do not invent experience or skills.
-2. Reorder bullet points to surface the most relevant experience first.
-3. Adjust the summary/objective to mention the role title and company.
-4. Emphasize skills and tools that match the job.
-5. Keep the same overall structure and length.
-6. Output plain text only — no markdown, no JSON, no explanation.
+---
+
+HARD RULES — NEVER BREAK THESE:
+1. Do NOT add any skill, tool, technology, or achievement that is not explicitly \
+in the original resume. Not even implied.
+2. Do NOT increase seniority, years of experience, or scope beyond what is written. \
+"Led a team of 3" cannot become "Led cross-functional teams."
+3. If the job requires a skill the candidate does NOT have, leave it out entirely. \
+Do not hint at it, approximate it, or frame adjacent experience as equivalent.
+4. If you are uncertain whether the candidate has something, assume they do not.
+
+WHAT YOU SHOULD DO:
+1. Read the job description carefully. Identify the 3-5 most important requirements.
+2. For each requirement, check if the resume has a direct match.
+   If YES → bring it forward, make it prominent, add context linking it to this role.
+   If NO  → do not mention it at all.
+3. Reorder bullet points within each role so the most relevant experience appears \
+first and the least relevant is at the bottom or removed.
+4. Rewrite the summary (2-3 sentences) using ONLY what is in the resume — connect \
+the candidate's real background to this specific role and company.
+5. Keep the same overall structure and approximate length.
+6. Output plain text only. No markdown, no JSON, no commentary.
+
+The goal is a resume that creates a strong, HONEST interview conversation — \
+not one that creates awkward questions about experience that does not exist.
 
 Tailored resume:"""
 
