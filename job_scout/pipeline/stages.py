@@ -280,16 +280,21 @@ def stage_auto_apply(db, config: Dict = None) -> Dict:
         print("  AUTO-APPLY skipped: APPLY_EMAIL not set in environment")
         return stats
 
-    # Load the resume from DB user_profile
+    # Load the raw .tex resume from disk — no DB involved
+    import pathlib
+    _tex_path = pathlib.Path(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ) / "data" / "resume.tex"
+
     resume_text = ""
-    try:
-        result = db._request("GET", "user_profile", params={"limit": 1})
-        resume_text = (result[0].get("resume_text", "") or "") if result else ""
-    except Exception as _profile_err:
-        print(f"  AUTO-APPLY: resume load failed — {_profile_err}")
+    if _tex_path.exists():
+        try:
+            resume_text = _tex_path.read_text(encoding="utf-8", errors="replace")
+        except Exception as _read_err:
+            print(f"  AUTO-APPLY: could not read resume.tex — {_read_err}")
 
     if not resume_text.strip():
-        print("  AUTO-APPLY skipped: no resume in profile (Profile → Resume)")
+        print(f"  AUTO-APPLY skipped: data/resume.tex not found or empty. Upload at Profile → Resume.")
         return stats
 
     try:

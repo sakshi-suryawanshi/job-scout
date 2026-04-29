@@ -108,22 +108,14 @@ with tab1:
         )
         if tex_file:
             raw_bytes = tex_file.read()
-            raw_tex   = raw_bytes.decode("utf-8", errors="replace")
             _DATA_DIR.mkdir(parents=True, exist_ok=True)
             _TEX_PATH.write_bytes(raw_bytes)
-
-            # Save raw LaTeX source to DB — Gemini will receive it as-is
-            if _save_profile({"resume_text": raw_tex}, profile.get("id") if profile else None):
-                st.success(
-                    f"✅ Saved **{tex_file.name}** to disk and DB "
-                    f"({len(raw_bytes)} bytes). "
-                    "Gemini will receive the full LaTeX source."
-                )
-                st.cache_data.clear()
-                profile = _load_profile()
-                st.rerun()
-            else:
-                st.warning("File saved to disk but DB save failed — check connection.")
+            # Saved to disk only — Gemini reads the file directly, no DB copy needed
+            st.success(
+                f"✅ Saved **{tex_file.name}** ({len(raw_bytes):,} bytes) "
+                f"to `data/resume.tex`. Gemini will read the file directly."
+            )
+            st.rerun()
 
         if _TEX_PATH.exists():
             with st.expander("Preview raw .tex source (first 600 chars)"):
@@ -134,14 +126,15 @@ with tab1:
 
     # ── Analyze with AI ───────────────────────────────────────────────────────
     st.divider()
-    existing_tex = profile.get("resume_text", "") if profile else ""
-    gemini_key   = _gemini_key()
+    # Read directly from disk — no DB involved
+    tex_on_disk = _TEX_PATH.read_text(encoding="utf-8", errors="replace") if _TEX_PATH.exists() else ""
+    gemini_key  = _gemini_key()
 
     if st.button(
         "🤖 Analyze with AI (extract skills & summary)",
         use_container_width=True,
-        disabled=not existing_tex or not gemini_key,
-        help="Gemini reads the raw .tex source and extracts your skills, experience, and best-fit roles"
+        disabled=not tex_on_disk or not gemini_key,
+        help="Gemini reads data/resume.tex and extracts your skills, experience, and best-fit roles"
               if gemini_key else "Set GEMINI_API_KEY first",
     ):
         os.environ["GEMINI_API_KEY"] = gemini_key
@@ -155,7 +148,7 @@ with tab1:
 - "preferred_roles": array of job titles this person is best suited for
 
 LaTeX resume:
-{existing_tex[:4000]}
+{tex_on_disk[:4000]}
 
 Return ONLY valid JSON."""
             with st.spinner("Gemini reading your .tex resume…"):

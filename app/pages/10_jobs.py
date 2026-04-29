@@ -43,32 +43,15 @@ def _save_browse_prefs(status: str, source: str, remote: str, sort: str):
         pass
 
 def _resume_text():
-    """Load resume text for Tailor Resume.
-
-    Priority:
-      1. user_profile.resume_text in DB  — raw LaTeX source saved on .tex upload
-      2. data/resume.tex on disk         — raw LaTeX source read directly
-    Gemini receives the raw .tex source; no text extraction is performed.
+    """Read the raw .tex resume from disk. Gemini receives it as-is.
+    Returns "" if the file has not been uploaded yet.
     """
-    # 1. DB
-    try:
-        result = db._request("GET", "user_profile", params={"limit": 1})
-        text = (result[0].get("resume_text", "") or "") if result else ""
-        if text.strip():
-            return text
-    except Exception:
-        pass
-
-    # 2. Disk fallback — raw .tex, no extraction
     from pathlib import Path
     tex_path = Path(__file__).parent.parent.parent / "data" / "resume.tex"
-    if tex_path.exists():
-        try:
-            return tex_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-    return ""
+    try:
+        return tex_path.read_text(encoding="utf-8", errors="replace") if tex_path.exists() else ""
+    except Exception:
+        return ""
 
 def _score_badge(score):
     if score >= 80:  return f"🟢 {score}"
@@ -150,7 +133,7 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
                              disabled=not key, help="Set GEMINI_API_KEY to enable"):
                     base = _resume_text()
                     if not base.strip():
-                        st.warning("No resume found. Go to **Profile → Resume** and upload your .tex file, then click **Save to DB**.")
+                        st.warning("No .tex file found. Go to **Profile → Resume** and upload your `resume.tex` file.")
                     else:
                         from job_scout.ai.gemini import GeminiClient, tailor_resume, fetch_job_description, generate_resume_html
                         os.environ["GEMINI_API_KEY"] = key
