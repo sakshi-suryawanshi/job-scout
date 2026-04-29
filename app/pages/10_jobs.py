@@ -260,11 +260,18 @@ with tab_queue:
         st.divider()
         bc1, bc2 = st.columns(2)
         with bc1:
-            if st.button(f"🌐 Open {len(selected_urls)} in browser", type="primary",
-                         use_container_width=True, disabled=not selected_urls):
-                js = "\n".join(f'window.open("{u}", "_blank");' for u in selected_urls[:20])
-                st.components.v1.html(f"<script>{js}</script>", height=0)
-                st.success(f"Opened {min(len(selected_urls), 20)} tabs!")
+            if selected_urls:
+                # Browsers block window.open() from iframes — show links instead
+                st.markdown("**🌐 Apply links (click each to open):**")
+                for i, (url, job) in enumerate(
+                    zip(selected_urls, [j for j in queue if j.get("apply_url")][:20]), 1
+                ):
+                    company = (job.get("companies") or {}).get("name", "Company")
+                    title   = job.get("title", "Role")[:40]
+                    st.markdown(f"{i}. [{title} @ {company}]({url})", unsafe_allow_html=False)
+            else:
+                st.button("🌐 Open links", disabled=True, use_container_width=True,
+                          help="Check 'Select first 20' above first")
         with bc2:
             if st.button(f"✅ Mark {len(selected_ids)} as Applied",
                          use_container_width=True, disabled=not selected_ids):

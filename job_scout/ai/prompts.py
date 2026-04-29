@@ -82,6 +82,11 @@ in the original resume. Not even implied.
 3. If the job requires a skill the candidate does NOT have, leave it out entirely. \
 Do not hint at it, approximate it, or frame adjacent experience as equivalent.
 4. If you are uncertain whether the candidate has something, assume they do not.
+5. NEVER change any proper noun — university names, city names, company names, \
+college names, degree names, dates, GPA, or any factual identifier. \
+If the resume says "Pune", write "Pune". If it says "University of XYZ", write \
+"University of XYZ" exactly. Changing a real place or institution name is \
+a serious factual error that will fail a background check.
 
 WHAT YOU SHOULD DO:
 1. Read the job description carefully. Identify the 3-5 most important requirements.
