@@ -20,18 +20,27 @@ def build_digest_html(db, run_stats: Dict, config: Dict = None) -> str:
     # Pull live data for digest sections
     try:
         all_jobs = db.get_jobs(limit=5000, days=0)
-        applied = [j for j in all_jobs if j.get("user_action") in ("applied", "responded", "interview", "interviewing")]
-        responded = [j for j in all_jobs if j.get("user_action") == "responded"]
+        applied   = [j for j in all_jobs if j.get("user_action") in ("applied", "responded", "interview", "interviewing")]
+        responded  = [j for j in all_jobs if j.get("user_action") == "responded"]
         interviews = [j for j in all_jobs if j.get("user_action") in ("interview", "interviewing")]
-        top_new = sorted(
+        top_new    = sorted(
             [j for j in all_jobs if j.get("is_new") and (j.get("match_score", 0) or 0) >= 70],
             key=lambda j: j.get("match_score", 0) or 0,
             reverse=True,
         )[:5]
+        # 60–69 range — skipped by auto-apply but worth a manual look
+        worth_checking = sorted(
+            [j for j in all_jobs
+             if j.get("is_new")
+             and 60 <= (j.get("match_score", 0) or 0) <= 69
+             and not j.get("user_action")],
+            key=lambda j: j.get("match_score", 0) or 0,
+            reverse=True,
+        )[:10]
         follow_ups = db.get_follow_ups_due()[:5]
     except Exception as _db_err:
         print(f"  digest: DB load error — {_db_err}")
-        applied = responded = interviews = top_new = follow_ups = []
+        applied = responded = interviews = top_new = worth_checking = follow_ups = []
 
     total_applied = len(applied)
     resp_rate = f"{len(responded)/total_applied*100:.1f}%" if total_applied else "—"
@@ -81,11 +90,32 @@ def build_digest_html(db, run_stats: Dict, config: Dict = None) -> str:
 <h2 style="color:#333;border-bottom:2px solid #eee;padding-bottom:4px">⭐ Top New Recommended</h2>
 <ul style="padding-left:20px">{jobs_html}</ul>""")
 
-    # ── ⚠️ Needs attention ──────────────────────────────────────────────────
+    # ── ⚠️ Needs attention (Tier 2 pre-filled — 70–89 range) ────────────────
     if auto_stats.get("needs_attention", 0) > 0:
         sections.append(f"""
-<h2 style="color:#e65c00;border-bottom:2px solid #eee;padding-bottom:4px">⚠️ Needs Your Attention ({auto_stats['needs_attention']})</h2>
-<p style="color:#666">These jobs matched your rules but need manual apply (non-Greenhouse/Lever/Ashby ATS). Check Jobs → Apply Queue.</p>""")
+<h2 style="color:#e65c00;border-bottom:2px solid #eee;padding-bottom:4px">⚠️ Pre-filled — Check &amp; Submit ({auto_stats['needs_attention']} jobs)</h2>
+<p style="color:#555">These scored <b>70–89</b> (or Tier 2 ATS). Playwright has pre-filled the form —
+open each link, verify the fields, and click Submit. Takes ~20 seconds each.</p>
+<p><a href="http://localhost:8501/jobs" style="color:#0066cc">→ Open Jobs → Needs Attention</a></p>""")
+
+    # ── 👀 Worth checking manually (60–69 range) ────────────────────────────
+    if worth_checking:
+        def _job_row_score(job) -> str:
+            company_info = job.get("companies", {}) or {}
+            company = company_info.get("name", "Unknown")
+            title   = job.get("title", "Unknown")
+            score   = job.get("match_score", 0) or 0
+            desp    = job.get("desperation_score", 0) or 0
+            url     = job.get("apply_url", "")
+            link    = f'<a href="{_e(url)}" style="color:#555">{_e(title)}</a>' if url else _e(title)
+            desp_badge = f' 🚨 desp:{desp}' if desp >= 50 else ""
+            return f"<li>{link} @ {_e(company)} — score <b>{score}</b>{desp_badge}</li>"
+
+        wc_html = "\n".join(_job_row_score(j) for j in worth_checking)
+        sections.append(f"""
+<h2 style="color:#777;border-bottom:2px solid #eee;padding-bottom:4px">👀 Worth a Manual Look (60–69 range, {len(worth_checking)} jobs)</h2>
+<p style="color:#888;font-size:11pt">Skipped by auto-apply (below 70). Mentioned here in case you spot a fit — apply manually if interested.</p>
+<ul style="padding-left:20px;color:#666">{wc_html}</ul>""")
 
     # ── 🔔 Follow-ups due ───────────────────────────────────────────────────
     if follow_ups:
