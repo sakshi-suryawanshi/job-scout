@@ -64,7 +64,21 @@ class GeminiClient:
         self.client = httpx.Client(timeout=60.0)
         self.requests_made = 0
 
-    def generate(self, prompt: str, max_tokens: int = 2048) -> Optional[str]:
+    def generate(self, prompt: str, max_tokens: int = 2048,
+                 _retry: int = 0) -> Optional[str]:
+        """Send a prompt to Gemini and return the text response.
+
+        Retries automatically on 429 rate-limit with exponential backoff:
+          attempt 1 → wait 30s → retry
+          attempt 2 → wait 60s → retry
+          attempt 3 → wait 90s → give up and return None
+
+        This is better than sleeping between every call:
+        - Zero wait when there is no rate limit
+        - Self-healing when the pipeline sends a burst
+        """
+        import time
+
         if _is_demo_mode():
             return "Demo mode — Gemini response mocked. Set DEMO_MODE=false and add GEMINI_API_KEY to enable."
         payload = {
@@ -84,16 +98,24 @@ class GeminiClient:
                 if parts:
                     return parts[0].get("text", "")
             return None
+
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                print("Gemini rate limit hit")
+                max_retries = 3
+                if _retry < max_retries:
+                    wait = 30 * (_retry + 1)   # 30s → 60s → 90s
+                    print(f"  Gemini rate limit — waiting {wait}s before retry {_retry + 1}/{max_retries}")
+                    time.sleep(wait)
+                    return self.generate(prompt, max_tokens, _retry=_retry + 1)
+                print("  Gemini rate limit — max retries reached, skipping")
             elif e.response.status_code == 403:
-                print("Gemini API key invalid")
+                print("  Gemini API key invalid or quota exhausted for today")
             else:
-                print(f"Gemini HTTP error: {e.response.status_code}")
+                print(f"  Gemini HTTP {e.response.status_code}: {e.response.text[:200]}")
             return None
+
         except Exception as e:
-            print(f"Gemini error: {e}")
+            print(f"  Gemini error: {e}")
             return None
 
     def generate_json(self, prompt: str, max_tokens: int = 2048) -> Optional[Dict]:
