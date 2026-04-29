@@ -43,11 +43,56 @@ def _save_browse_prefs(status: str, source: str, remote: str, sort: str):
         pass
 
 def _resume_text():
+    """Load resume text for Tailor Resume.
+
+    Priority:
+      1. user_profile.resume_text in DB  (saved after .tex upload or paste)
+      2. data/resume.tex on disk         (raw .tex — extract on the fly)
+    Returns "" if neither is available.
+    """
+    # 1. DB
     try:
         result = db._request("GET", "user_profile", params={"limit": 1})
-        return (result[0].get("resume_text", "") or "") if result else ""
+        text = (result[0].get("resume_text", "") or "") if result else ""
+        if text.strip():
+            return text
     except Exception:
-        return ""
+        pass
+
+    # 2. Disk fallback — read .tex and extract
+    from pathlib import Path
+    tex_path = Path(__file__).parent.parent.parent / "data" / "resume.tex"
+    if tex_path.exists():
+        try:
+            import re
+            source = tex_path.read_bytes()
+            # re-use the same extractor from the profile page
+            from io import BytesIO
+            raw = source
+            # Pre-strip \href / \url before pylatexenc
+            src = source.decode("utf-8", errors="replace")
+            src = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", src)
+            src = re.sub(r"\\url\{([^}]*)\}", r"\1", src)
+            try:
+                from pylatexenc.latex2text import LatexNodes2Text
+                plain = LatexNodes2Text().latex_to_text(src)
+                plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+                if len(plain) > 100:
+                    return plain
+            except Exception:
+                pass
+            # Regex fallback
+            text = re.sub(r"\\begin\{[^}]+\}|\\end\{[^}]+\}", "", src)
+            text = re.sub(r"\\[a-zA-Z]+\*?\{([^}]*)\}", r"\1", text)
+            text = re.sub(r"\\[a-zA-Z]+\*?\s*", " ", text)
+            text = re.sub(r"[{}]|%[^\n]*", " ", text)
+            text = re.sub(r"\n{3,}", "\n\n", text).strip()
+            if len(text) > 100:
+                return text
+        except Exception:
+            pass
+
+    return ""
 
 def _score_badge(score):
     if score >= 80:  return f"🟢 {score}"
@@ -129,7 +174,7 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
                              disabled=not key, help="Set GEMINI_API_KEY to enable"):
                     base = _resume_text()
                     if not base.strip():
-                        st.warning("No resume found. Go to Profile → Resume first.")
+                        st.warning("No resume found. Go to **Profile → Resume** and upload your .tex file, then click **Save to DB**.")
                     else:
                         from job_scout.ai.gemini import GeminiClient, tailor_resume, fetch_job_description, generate_resume_html
                         os.environ["GEMINI_API_KEY"] = key
@@ -147,21 +192,42 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
                             st.session_state[f"job_title_{job_id}"] = job.get("title", "Role")
                             st.session_state[f"company_{job_id}"] = company_name
 
-        # Show tailored resume if generated
+        # ── Show tailored resume + downloads ──────────────────────────────
         if f"tailored_{job_id}" in st.session_state:
             from job_scout.ai.gemini import generate_resume_html
-            t = st.session_state[f"tailored_{job_id}"]
+            t     = st.session_state[f"tailored_{job_id}"]
             title = st.session_state.get(f"job_title_{job_id}", "Role")
             cname = st.session_state.get(f"company_{job_id}", company_name)
             st.divider()
-            st.markdown("**Tailored Resume**")
-            st.text_area("Edit or copy:", value=t, height=350, key=f"{key_prefix}_ta_{job_id}")
-            dc1, dc2 = st.columns(2)
+            st.success("✅ Resume tailored for this job. Download and use it when applying manually.")
+            st.caption("Gemini rewrote your resume using only your real experience, prioritised to match this role.")
+            dc1, dc2, dc3 = st.columns(3)
             with dc1:
-                st.download_button("📥 .txt", t, f"resume_{cname}.txt", key=f"{key_prefix}_dl_t_{job_id}")
+                st.download_button(
+                    "📥 Download .txt",
+                    t,
+                    file_name=f"resume_{cname}.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                    key=f"{key_prefix}_dl_t_{job_id}",
+                    help="Plain text — paste into online forms",
+                )
             with dc2:
-                st.download_button("📥 .html (→ PDF)", generate_resume_html(t, title, cname),
-                                   f"resume_{cname}.html", mime="text/html", key=f"{key_prefix}_dl_h_{job_id}")
+                html = generate_resume_html(t, title, cname)
+                st.download_button(
+                    "📥 Download .html → PDF",
+                    html,
+                    file_name=f"resume_{cname}.html",
+                    mime="text/html",
+                    use_container_width=True,
+                    key=f"{key_prefix}_dl_h_{job_id}",
+                    help="Open in browser → Cmd+P → Save as PDF",
+                )
+            with dc3:
+                if st.button("✏️ Preview / Edit", use_container_width=True, key=f"{key_prefix}_pr_{job_id}"):
+                    st.session_state[f"show_preview_{job_id}"] = not st.session_state.get(f"show_preview_{job_id}", False)
+            if st.session_state.get(f"show_preview_{job_id}"):
+                st.text_area("Edit before downloading:", value=t, height=350, key=f"{key_prefix}_ta_{job_id}")
 
 
 # ── Page ─────────────────────────────────────────────────────────────────────
