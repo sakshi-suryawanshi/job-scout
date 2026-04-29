@@ -49,11 +49,15 @@ def to_db_job(job: Dict, company_id: Optional[str] = None) -> Dict:
         except (ValueError, TypeError):
             pass
 
+    from job_scout.enrichment.dedup import is_globally_remote
+    is_global = is_globally_remote(job)
+
     return {
         "company_id": company_id,
         "title": title,
         "location": job.get("location", "")[:500],
         "is_remote": job.get("is_remote", False),
+        "is_remote_global": is_global,
         "apply_url": job.get("apply_url", ""),
         "source_board": job.get("source_board", "unknown"),
         "fingerprint": fingerprint,
