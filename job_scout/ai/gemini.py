@@ -377,18 +377,16 @@ def score_all_jobs(db, criteria: Dict, use_ai: bool = False, max_jobs: int = 200
     scored_count, total_score = 0, 0
 
     if ai_available and gemini:
-        ai_candidates = []
-        for j in unscored:
-            rule_result = score_job_rule_based(j, criteria)
-            if rule_result["score"] >= 15:
-                ai_candidates.append(j)
-            else:
-                _update_job_score(db, j["id"], rule_result["score"], rule_result["match_reason"] + " (pre-filtered)")
-                scored_count += 1
-                total_score += rule_result["score"]
+        # Send ALL unscored jobs to Gemini — no pre-filter threshold.
+        # matches_criteria() already confirmed these jobs have title keywords,
+        # remote flag, and skills. A secondary rule-based cut-off at score>=15
+        # risks dropping borderline-good jobs that Gemini would rate higher.
+        # With ~50-100 new jobs per scrape and 1500 free requests/day, quota
+        # is never a concern at this scale.
+        ai_candidates = list(unscored)
 
         if progress_callback and ai_candidates:
-            progress_callback(f"Pre-filter: {len(unscored) - len(ai_candidates)} skipped, {len(ai_candidates)} sent to Gemini", 0.1)
+            progress_callback(f"Sending {len(ai_candidates)} jobs to Gemini AI for scoring...", 0.1)
 
         batch_size = 10
         for i in range(0, len(ai_candidates), batch_size):
