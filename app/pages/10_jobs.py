@@ -130,16 +130,16 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
                 # Tailored resume
                 key = _gemini_key()
                 if st.button("📄 Tailor Resume", key=f"{key_prefix}_tr_{job_id}", use_container_width=True,
-                             disabled=not key, help="Set GEMINI_API_KEY to enable"):
+                             disabled=not key, help="Rewrites your .tex resume for this specific job using Gemini"):
                     base = _resume_text()
                     if not base.strip():
                         st.warning("No .tex file found. Go to **Profile → Resume** and upload your `resume.tex` file.")
                     else:
                         from job_scout.ai.gemini import GeminiClient, tailor_resume, fetch_job_description, generate_resume_html
                         os.environ["GEMINI_API_KEY"] = key
-                        with st.spinner("Fetching job description..."):
+                        with st.spinner("Fetching job description from apply URL…"):
                             jd = fetch_job_description(job.get("apply_url", ""))
-                        with st.spinner("Tailoring resume..."):
+                        with st.spinner("Gemini tailoring your resume for this role…"):
                             try:
                                 gemini = GeminiClient(key)
                                 tailored = tailor_resume(gemini, base, job, jd)
@@ -150,6 +150,12 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
                             st.session_state[f"tailored_{job_id}"] = tailored
                             st.session_state[f"job_title_{job_id}"] = job.get("title", "Role")
                             st.session_state[f"company_{job_id}"] = company_name
+                        else:
+                            st.warning(
+                                "⚠️ Gemini returned empty — most likely the **rate limit** was hit "
+                                "(15 requests/minute on the free tier). "
+                                "Wait 60 seconds and click **Tailor Resume** again."
+                            )
 
         # ── Show tailored resume + downloads ──────────────────────────────
         if f"tailored_{job_id}" in st.session_state:
