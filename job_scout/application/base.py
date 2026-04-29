@@ -67,25 +67,25 @@ def resume_pdf_path() -> str:
     return _RESUME_PDF_PATH if os.path.exists(_RESUME_PDF_PATH) else ""
 
 
-def write_resume_tempfile(resume_text: str, suffix: str = ".txt") -> str:
+def write_resume_tempfile(resume_text: str, use_pdf: bool = False) -> str:
     """Write resume to a named temp file for Playwright to attach.
 
-    Priority:
-      1. If data/resume.pdf exists → always attach the real PDF (no suffix override needed).
-         ATS forms accept PDFs; this is the cleanest upload.
-      2. Otherwise fall back to writing resume_text as a .txt file.
+    use_pdf=True  (score 70–79):
+        Attach the stored PDF directly — no tailoring effort wasted on lower scores.
+        Falls back to text if no PDF is on disk.
 
-    Callers always pass resume_text as a safety net; if the PDF is on disk it takes precedence.
+    use_pdf=False (score ≥ 80):
+        Attach the tailored text that was already rewritten by Gemini.
+        This is the .tex-extracted + AI-tailored version; more effort = higher response rate.
     """
-    # Always prefer the stored PDF when it exists — attach the real file to ATS forms
-    if os.path.exists(_RESUME_PDF_PATH):
+    if use_pdf and os.path.exists(_RESUME_PDF_PATH):
         import shutil
         tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
         tmp.close()
         shutil.copy2(_RESUME_PDF_PATH, tmp.name)
         return tmp.name
 
-    # Fallback: write the text content (from .tex extraction or plain paste)
+    # Write tailored text (or plain text if no tailoring was done)
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
     )

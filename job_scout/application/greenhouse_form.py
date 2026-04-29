@@ -21,6 +21,7 @@ def apply_greenhouse(
     cover_letter: str = "",
     headless: bool = True,
     profile: Optional[Dict] = None,
+    use_pdf: bool = False,
 ) -> ApplyResult:
     """
     Auto-fill and submit a Greenhouse application form.
@@ -52,7 +53,7 @@ def apply_greenhouse(
             error="APPLY_EMAIL not set in environment",
         )
 
-    resume_path = write_resume_tempfile(resume_text, ".tex")
+    resume_path = write_resume_tempfile(resume_text, use_pdf=use_pdf)
     screenshot_path = ""
 
     try:

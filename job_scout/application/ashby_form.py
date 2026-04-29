@@ -19,6 +19,7 @@ def apply_ashby(
     cover_letter: str = "",
     headless: bool = True,
     profile: Optional[Dict] = None,
+    use_pdf: bool = False,
 ) -> ApplyResult:
     """Auto-fill and submit an Ashby application form."""
     try:
@@ -35,7 +36,7 @@ def apply_ashby(
     if not profile.get("email"):
         return ApplyResult(status="failed", tier=1, apply_url=apply_url, error="APPLY_EMAIL not set")
 
-    resume_path = write_resume_tempfile(resume_text, ".tex")
+    resume_path = write_resume_tempfile(resume_text, use_pdf=use_pdf)
     screenshot_path = ""
 
     try:

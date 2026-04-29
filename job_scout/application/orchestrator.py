@@ -52,40 +52,70 @@ def apply_to_job(
     ats_type = (company_info.get("ats_type") or job.get("ats_type") or "unknown").lower()
     source_board = (job.get("source_board") or "").lower()
 
-    # ── Generate cover letter (shared across tiers) ───────────────────────
+    score = int(job.get("match_score") or 0)
+
+    # ── Resume strategy based on score ───────────────────────────────────
+    # ≥ 80: tailor the .tex-extracted text with Gemini for this specific job
+    # 70–79: attach the PDF directly — no tailoring effort on lower scores
+    if score >= 80:
+        tailored_resume = _tailor_resume_for_job(job, resume_text)
+        use_pdf = False   # attach the Gemini-tailored text
+    else:
+        tailored_resume = resume_text   # not used for attachment, just for cover letter
+        use_pdf = True    # attach original PDF directly
+
+    # ── Generate cover letter (shared across tiers, always uses .tex text) ─
     cover_letter = _generate_cover_letter(job, resume_text)
 
-    # ── Tier 3: Email outreach ────────────────────────────────────────────
+    # ── Tier 3: Email outreach ─────────────────────────────────────────────
     if source_board in _TIER3_SOURCES or "hn_" in apply_url or "news.ycombinator.com" in apply_url:
         from job_scout.application.email_outreach import send_outreach_email
         result = send_outreach_email(job, resume_text, profile)
         _record_application(db, job, result, resume_text)
         return result
 
-    # ── Tier 1: Full automation ───────────────────────────────────────────
+    # ── Tier 1: Full automation ────────────────────────────────────────────
     if ats_type == "greenhouse":
         from job_scout.application.greenhouse_form import apply_greenhouse
-        result = apply_greenhouse(apply_url, resume_text, cover_letter, headless, profile)
-        _record_application(db, job, result, resume_text)
+        result = apply_greenhouse(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
+        _record_application(db, job, result, tailored_resume)
         return result
 
     if ats_type == "lever":
         from job_scout.application.lever_form import apply_lever
-        result = apply_lever(apply_url, resume_text, cover_letter, headless, profile)
-        _record_application(db, job, result, resume_text)
+        result = apply_lever(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
+        _record_application(db, job, result, tailored_resume)
         return result
 
     if ats_type == "ashby":
         from job_scout.application.ashby_form import apply_ashby
-        result = apply_ashby(apply_url, resume_text, cover_letter, headless, profile)
-        _record_application(db, job, result, resume_text)
+        result = apply_ashby(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
+        _record_application(db, job, result, tailored_resume)
         return result
 
-    # ── Tier 2: Semi-automation (everything else) ─────────────────────────
+    # ── Tier 2: Semi-automation (everything else) ──────────────────────────
     from job_scout.application.manual import prepare_manual_apply
-    result = prepare_manual_apply(job, resume_text, profile)
-    _record_application(db, job, result, resume_text)
+    result = prepare_manual_apply(job, tailored_resume if score >= 80 else resume_text, profile)
+    _record_application(db, job, result, tailored_resume)
     return result
+
+
+def _tailor_resume_for_job(job: Dict, resume_text: str) -> str:
+    """Rewrite resume_text for this specific job using Gemini.
+    Called only for score ≥ 80 — saves Gemini quota on lower-confidence jobs.
+    Falls back to the original text if Gemini is unavailable or fails.
+    """
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key or not resume_text:
+        return resume_text
+    try:
+        from job_scout.ai.gemini import GeminiClient, tailor_resume
+        gemini = GeminiClient(gemini_key)
+        tailored = tailor_resume(gemini, resume_text, job,
+                                  job_description=(job.get("description") or "")[:2000])
+        return tailored or resume_text
+    except Exception:
+        return resume_text   # graceful degradation — original text still gets submitted
 
 
 def _generate_cover_letter(job: Dict, resume_text: str) -> str:

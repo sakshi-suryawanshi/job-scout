@@ -18,6 +18,7 @@ def apply_lever(
     cover_letter: str = "",
     headless: bool = True,
     profile: Optional[Dict] = None,
+    use_pdf: bool = False,
 ) -> ApplyResult:
     """Auto-fill and submit a Lever application form."""
     try:
@@ -37,7 +38,7 @@ def apply_lever(
     # Lever apply URLs end in /apply — add it if missing
     url = apply_url if apply_url.endswith("/apply") else apply_url.rstrip("/") + "/apply"
 
-    resume_path = write_resume_tempfile(resume_text, ".tex")
+    resume_path = write_resume_tempfile(resume_text, use_pdf=use_pdf)
     screenshot_path = ""
 
     try:
