@@ -35,7 +35,7 @@ def apply_ashby(
     if not profile.get("email"):
         return ApplyResult(status="failed", tier=1, apply_url=apply_url, error="APPLY_EMAIL not set")
 
-    resume_path = write_resume_tempfile(resume_text, ".txt")
+    resume_path = write_resume_tempfile(resume_text, ".tex")
     screenshot_path = ""
 
     try:

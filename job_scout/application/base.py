@@ -56,10 +56,38 @@ def load_applicant_profile() -> Dict:
     }
 
 
+_RESUME_PDF_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "data", "resume.pdf",
+)
+
+
+def resume_pdf_path() -> str:
+    """Return the path where the uploaded PDF resume is stored, or '' if not present."""
+    return _RESUME_PDF_PATH if os.path.exists(_RESUME_PDF_PATH) else ""
+
+
 def write_resume_tempfile(resume_text: str, suffix: str = ".txt") -> str:
-    """Write resume text to a named temp file. Caller must delete it."""
+    """Write resume to a named temp file for Playwright to attach.
+
+    Priority:
+      1. If data/resume.pdf exists → always attach the real PDF (no suffix override needed).
+         ATS forms accept PDFs; this is the cleanest upload.
+      2. Otherwise fall back to writing resume_text as a .txt file.
+
+    Callers always pass resume_text as a safety net; if the PDF is on disk it takes precedence.
+    """
+    # Always prefer the stored PDF when it exists — attach the real file to ATS forms
+    if os.path.exists(_RESUME_PDF_PATH):
+        import shutil
+        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        tmp.close()
+        shutil.copy2(_RESUME_PDF_PATH, tmp.name)
+        return tmp.name
+
+    # Fallback: write the text content (from .tex extraction or plain paste)
     tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=suffix, delete=False, encoding="utf-8"
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
     )
     tmp.write(resume_text)
     tmp.close()

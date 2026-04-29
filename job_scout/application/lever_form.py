@@ -37,7 +37,7 @@ def apply_lever(
     # Lever apply URLs end in /apply — add it if missing
     url = apply_url if apply_url.endswith("/apply") else apply_url.rstrip("/") + "/apply"
 
-    resume_path = write_resume_tempfile(resume_text, ".txt")
+    resume_path = write_resume_tempfile(resume_text, ".tex")
     screenshot_path = ""
 
     try:

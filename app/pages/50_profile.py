@@ -126,53 +126,92 @@ with tab1:
 
     st.divider()
 
-    # ── PRIMARY: File upload (PDF or .tex) ───────────────────────────────────
-    st.write("**Upload resume file**")
-    uploaded = st.file_uploader(
-        "Choose a PDF or LaTeX (.tex) file",
-        type=["pdf", "tex"],
-        help="PDF: any standard resume PDF. LaTeX: .tex source file (LaTeX markup is stripped automatically).",
-        key="resume_upload",
-    )
+    from pathlib import Path as _Path
+    _DATA_DIR = _Path(__file__).parent.parent.parent / "data"
+    _PDF_PATH  = _DATA_DIR / "resume.pdf"
+    _TEX_PATH  = _DATA_DIR / "resume.tex"
 
-    extracted_text = ""
-    if uploaded is not None:
-        file_bytes = uploaded.read()
-        ext = uploaded.name.rsplit(".", 1)[-1].lower()
+    col_pdf, col_tex = st.columns(2)
 
-        with st.spinner(f"Parsing {ext.upper()} file…"):
-            if ext == "pdf":
-                extracted_text = _extract_pdf(file_bytes)
-            elif ext == "tex":
-                extracted_text = _extract_tex(file_bytes)
+    # ── LEFT: PDF upload ──────────────────────────────────────────────────────
+    with col_pdf:
+        st.write("**📄 PDF — direct ATS upload**")
+        st.caption("Used as-is when Playwright attaches your resume to application forms. No modification.")
 
-        if extracted_text:
-            st.success(f"✅ Extracted {len(extracted_text.split()):,} words from **{uploaded.name}**")
-            with st.expander("Preview extracted text (first 800 chars)"):
-                st.text(extracted_text[:800] + ("…" if len(extracted_text) > 800 else ""))
+        if _PDF_PATH.exists():
+            size_kb = _PDF_PATH.stat().st_size // 1024
+            st.success(f"✅ resume.pdf on file ({size_kb} KB)")
         else:
-            st.error("Could not extract text from the file. Try a different file or paste manually below.")
+            st.info("No PDF yet.")
 
-    # Action buttons (only active when a file was just uploaded)
+        pdf_file = st.file_uploader("Upload PDF", type=["pdf"], key="upload_pdf",
+                                    label_visibility="collapsed")
+        if pdf_file:
+            _DATA_DIR.mkdir(parents=True, exist_ok=True)
+            _PDF_PATH.write_bytes(pdf_file.read())
+            st.success(f"✅ Saved **{pdf_file.name}** as resume.pdf")
+            st.rerun()
+
+        if _PDF_PATH.exists():
+            if st.button("🗑️ Remove PDF", key="del_pdf", use_container_width=True):
+                _PDF_PATH.unlink()
+                st.rerun()
+
+    # ── RIGHT: .tex upload ────────────────────────────────────────────────────
+    with col_tex:
+        st.write("**🔧 LaTeX (.tex) — AI tailoring**")
+        st.caption("Gemini reads this source when tailoring your resume for a specific job.")
+
+        if _TEX_PATH.exists():
+            size_kb = _TEX_PATH.stat().st_size // 1024
+            st.success(f"✅ resume.tex on file ({size_kb} KB)")
+        else:
+            st.info("No .tex file yet.")
+
+        tex_file = st.file_uploader("Upload .tex", type=["tex"], key="upload_tex",
+                                    label_visibility="collapsed")
+        extracted_text = ""
+        if tex_file:
+            raw_bytes = tex_file.read()
+            with st.spinner("Parsing .tex…"):
+                extracted_text = _extract_tex(raw_bytes)
+            if extracted_text:
+                # Save raw source for re-use, extracted text to DB
+                _DATA_DIR.mkdir(parents=True, exist_ok=True)
+                _TEX_PATH.write_bytes(raw_bytes)
+                st.success(f"✅ Saved **{tex_file.name}** ({len(extracted_text.split()):,} words extracted)")
+                with st.expander("Preview extracted text"):
+                    st.text(extracted_text[:600] + ("…" if len(extracted_text) > 600 else ""))
+
+        if _TEX_PATH.exists():
+            if st.button("🗑️ Remove .tex", key="del_tex", use_container_width=True):
+                _TEX_PATH.unlink()
+                st.rerun()
+
+    # ── Save + Analyze ────────────────────────────────────────────────────────
+    st.divider()
+
+    # Determine which text to use — freshly uploaded .tex takes precedence,
+    # otherwise fall back to whatever is already saved in the DB
+    text_to_save = extracted_text.strip() if extracted_text.strip() else existing_text
+
     b1, b2 = st.columns(2)
     with b1:
-        save_disabled = not extracted_text.strip()
-        if st.button("💾 Save Resume", use_container_width=True, type="primary",
-                     disabled=save_disabled,
-                     help="Upload a file above first" if save_disabled else "Save extracted text to DB"):
-            if _save_profile({"resume_text": extracted_text.strip()},
+        if st.button("💾 Save to DB", use_container_width=True, type="primary",
+                     disabled=not text_to_save,
+                     help="Saves extracted .tex text so Gemini can use it for scoring and tailoring"):
+            if _save_profile({"resume_text": text_to_save},
                              profile.get("id") if profile else None):
-                st.success("Resume saved!")
+                st.success("Resume text saved to DB!")
                 st.cache_data.clear()
                 profile = _load_profile()
                 st.rerun()
 
     with b2:
         gemini_key = _gemini_key()
-        analyze_disabled = not extracted_text.strip() or not gemini_key
-        if st.button("🤖 Save & Analyze with AI", use_container_width=True,
-                     disabled=analyze_disabled,
-                     help="Saves resume and extracts skills / experience / roles using Gemini" if gemini_key else "Set GEMINI_API_KEY first"):
+        if st.button("🤖 Analyze with AI", use_container_width=True,
+                     disabled=not text_to_save or not gemini_key,
+                     help="Extracts skills / experience / roles using Gemini" if gemini_key else "Set GEMINI_API_KEY first"):
             os.environ["GEMINI_API_KEY"] = gemini_key
             try:
                 from job_scout.ai.gemini import GeminiClient
@@ -180,37 +219,34 @@ with tab1:
                 prompt = f"""Analyze this resume and return JSON with:
 - "summary": 2-3 sentence professional summary
 - "skills": array of technical skills (languages, frameworks, tools)
-- "experience_years": integer (total years of professional experience)
+- "experience_years": integer
 - "preferred_roles": array of job titles that best fit this person
-- "strengths": array of 3-5 key professional strengths
 
 Resume:
-{extracted_text[:3000]}
+{text_to_save[:3000]}
 
 Return ONLY valid JSON."""
                 with st.spinner("Analyzing with Gemini…"):
                     resp = gemini.generate_json(prompt, max_tokens=1000)
                 if resp:
                     update = {
-                        "resume_text":     extracted_text.strip(),
-                        "resume_summary":  resp.get("summary", ""),
-                        "skills":          json.dumps(resp.get("skills", [])),
+                        "resume_text":      text_to_save,
+                        "resume_summary":   resp.get("summary", ""),
+                        "skills":           json.dumps(resp.get("skills", [])),
                         "experience_years": resp.get("experience_years", 0),
-                        "preferred_roles": json.dumps(resp.get("preferred_roles", [])),
+                        "preferred_roles":  json.dumps(resp.get("preferred_roles", [])),
                     }
                     if _save_profile(update, profile.get("id") if profile else None):
-                        st.success("✅ Resume saved and analyzed!")
+                        st.success("✅ Analyzed and saved!")
                         st.cache_data.clear()
                         profile = _load_profile()
-                    else:
-                        st.warning("Analysis complete but DB save failed — check connection.")
                     ac1, ac2 = st.columns(2)
                     ac1.write(f"**Summary:** {resp.get('summary','')}")
-                    ac1.write(f"**Experience:** ~{resp.get('experience_years','?')} years")
+                    ac1.write(f"**Experience:** ~{resp.get('experience_years','?')} yrs")
                     if resp.get("skills"):
                         ac2.write(f"**Skills:** {', '.join(resp['skills'][:15])}")
                     if resp.get("preferred_roles"):
-                        ac2.write(f"**Best fit:** {', '.join(resp['preferred_roles'])}")
+                        ac2.write(f"**Roles:** {', '.join(resp['preferred_roles'])}")
             except Exception as e:
                 st.error(f"AI error: {e}")
 

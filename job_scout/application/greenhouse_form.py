@@ -52,7 +52,7 @@ def apply_greenhouse(
             error="APPLY_EMAIL not set in environment",
         )
 
-    resume_path = write_resume_tempfile(resume_text, ".txt")
+    resume_path = write_resume_tempfile(resume_text, ".tex")
     screenshot_path = ""
 
     try:
