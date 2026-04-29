@@ -246,39 +246,61 @@ with tab_queue:
 
     st.write(f"**{len(queue)} jobs** ready to apply")
 
-    selected_ids, selected_urls = [], []
-    sel_all = st.checkbox("Select first 20 for bulk open", key="q_sel_all")
+    # ── Per-job checkboxes + individual cards ─────────────────────────────────
+    selected_ids, selected_urls, selected_jobs = [], [], []
 
     for idx, job in enumerate(queue):
-        _job_card(job, key_prefix="qq")
-        job_id = job.get("id")
-        if sel_all and idx < 20 and job.get("apply_url"):
-            selected_ids.append(job_id)
-            selected_urls.append(job["apply_url"])
+        job_id  = job.get("id", "")
+        company = (job.get("companies") or {}).get("name", "?")
+        title   = job.get("title", "?")
+        score   = job.get("match_score", 0) or 0
+        url     = job.get("apply_url", "")
 
+        col_chk, col_card = st.columns([0.05, 0.95])
+        with col_chk:
+            checked = st.checkbox("", key=f"qq_chk_{job_id}",
+                                  label_visibility="collapsed")
+        with col_card:
+            _job_card(job, key_prefix="qq")
+
+        if checked and url:
+            selected_ids.append(job_id)
+            selected_urls.append(url)
+            selected_jobs.append(job)
+
+    # ── Sticky action bar ──────────────────────────────────────────────────────
     if queue:
         st.divider()
-        bc1, bc2 = st.columns(2)
-        with bc1:
-            if selected_urls:
-                # Browsers block window.open() from iframes — show links instead
-                st.markdown("**🌐 Apply links (click each to open):**")
-                for i, (url, job) in enumerate(
-                    zip(selected_urls, [j for j in queue if j.get("apply_url")][:20]), 1
-                ):
-                    company = (job.get("companies") or {}).get("name", "Company")
-                    title   = job.get("title", "Role")[:40]
-                    st.markdown(f"{i}. [{title} @ {company}]({url})", unsafe_allow_html=False)
-            else:
-                st.button("🌐 Open links", disabled=True, use_container_width=True,
-                          help="Check 'Select first 20' above first")
-        with bc2:
-            if st.button(f"✅ Mark {len(selected_ids)} as Applied",
-                         use_container_width=True, disabled=not selected_ids):
-                for jid in selected_ids:
-                    db.mark_job_applied(jid)
-                st.success(f"Marked {len(selected_ids)} as applied!")
-                st.rerun()
+        n = len(selected_ids)
+
+        if n == 0:
+            st.caption("☝️ Tick the checkbox next to any job above to select it — then use the buttons below.")
+        else:
+            st.success(f"**{n} job{'s' if n > 1 else ''} selected**")
+            bc1, bc2 = st.columns(2)
+
+            with bc1:
+                # Show links to apply manually — st.link_button works as real HTML anchor
+                with st.expander(f"🌐 Open {n} apply page{'s' if n > 1 else ''}", expanded=True):
+                    for job in selected_jobs:
+                        url     = job.get("apply_url", "")
+                        company = (job.get("companies") or {}).get("name", "Company")
+                        title   = (job.get("title") or "Role")[:45]
+                        score   = job.get("match_score", 0) or 0
+                        if url:
+                            st.link_button(
+                                f"↗ {title} @ {company}  ({score})",
+                                url,
+                                use_container_width=True,
+                            )
+
+            with bc2:
+                if st.button(f"✅ Mark {n} as Applied",
+                             use_container_width=True, type="primary"):
+                    for jid in selected_ids:
+                        db.mark_job_applied(jid)
+                    st.success(f"Marked {n} as applied!")
+                    st.rerun()
 
 
 # ── Tab: All Jobs ─────────────────────────────────────────────────────────────
