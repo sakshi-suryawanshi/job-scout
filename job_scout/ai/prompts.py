@@ -57,6 +57,10 @@ JSON:"""
 TAILOR_PROMPT = """\
 You are helping tailor a resume for a specific job application.
 
+The resume below is provided as **raw LaTeX source** (.tex file). \
+Read it as a structured document — sections, bullet points, dates, and skills \
+are all encoded in LaTeX markup. You understand LaTeX natively.
+
 **Job details:**
 - Title: {job_title}
 - Company: {company_name}
@@ -65,7 +69,7 @@ You are helping tailor a resume for a specific job application.
 - Source board: {source_board}
 {description_section}
 
-**Candidate's base resume:**
+**Candidate's base resume (raw LaTeX source):**
 {resume_text}
 
 ---

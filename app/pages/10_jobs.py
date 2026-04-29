@@ -46,9 +46,9 @@ def _resume_text():
     """Load resume text for Tailor Resume.
 
     Priority:
-      1. user_profile.resume_text in DB  (saved after .tex upload or paste)
-      2. data/resume.tex on disk         (raw .tex — extract on the fly)
-    Returns "" if neither is available.
+      1. user_profile.resume_text in DB  — raw LaTeX source saved on .tex upload
+      2. data/resume.tex on disk         — raw LaTeX source read directly
+    Gemini receives the raw .tex source; no text extraction is performed.
     """
     # 1. DB
     try:
@@ -59,36 +59,12 @@ def _resume_text():
     except Exception:
         pass
 
-    # 2. Disk fallback — read .tex and extract
+    # 2. Disk fallback — raw .tex, no extraction
     from pathlib import Path
     tex_path = Path(__file__).parent.parent.parent / "data" / "resume.tex"
     if tex_path.exists():
         try:
-            import re
-            source = tex_path.read_bytes()
-            # re-use the same extractor from the profile page
-            from io import BytesIO
-            raw = source
-            # Pre-strip \href / \url before pylatexenc
-            src = source.decode("utf-8", errors="replace")
-            src = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", src)
-            src = re.sub(r"\\url\{([^}]*)\}", r"\1", src)
-            try:
-                from pylatexenc.latex2text import LatexNodes2Text
-                plain = LatexNodes2Text().latex_to_text(src)
-                plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
-                if len(plain) > 100:
-                    return plain
-            except Exception:
-                pass
-            # Regex fallback
-            text = re.sub(r"\\begin\{[^}]+\}|\\end\{[^}]+\}", "", src)
-            text = re.sub(r"\\[a-zA-Z]+\*?\{([^}]*)\}", r"\1", text)
-            text = re.sub(r"\\[a-zA-Z]+\*?\s*", " ", text)
-            text = re.sub(r"[{}]|%[^\n]*", " ", text)
-            text = re.sub(r"\n{3,}", "\n\n", text).strip()
-            if len(text) > 100:
-                return text
+            return tex_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             pass
 
