@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import io
 import json
 
 st.set_page_config(page_title="Profile — Job Scout", page_icon="📄", layout="wide")
@@ -26,6 +27,43 @@ def _load_profile():
     except Exception:
         return None
 
+def _extract_pdf(file_bytes: bytes) -> str:
+    """Extract plain text from a PDF file using pdfminer.six."""
+    try:
+        from pdfminer.high_level import extract_text_to_fp
+        from pdfminer.layout import LAParams
+        output = io.StringIO()
+        extract_text_to_fp(
+            io.BytesIO(file_bytes),
+            output,
+            laparams=LAParams(),
+            output_type="text",
+            codec="utf-8",
+        )
+        text = output.getvalue()
+        # Collapse excessive blank lines left by pdfminer
+        import re
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text
+    except Exception as e:
+        st.error(f"PDF parse error: {e}")
+        return ""
+
+
+def _extract_tex(file_bytes: bytes) -> str:
+    """Strip LaTeX markup and return plain text using pylatexenc."""
+    try:
+        from pylatexenc.latex2text import LatexNodes2Text
+        source = file_bytes.decode("utf-8", errors="replace")
+        plain = LatexNodes2Text().latex_to_text(source)
+        import re
+        plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+        return plain
+    except Exception as e:
+        st.error(f"LaTeX parse error: {e}")
+        return ""
+
+
 def _save_profile(data: dict, profile_id: str = None):
     try:
         if profile_id:
@@ -47,73 +85,158 @@ profile = _load_profile()
 # ── Tab 1: Resume ─────────────────────────────────────────────────────────────
 with tab1:
     st.subheader("Your Resume")
-    st.caption("Used by AI scoring and tailored resume generation.")
+    st.caption("Upload your resume as **PDF** or **LaTeX (.tex)** — used for AI scoring, tailored applications, and Playwright form fills.")
 
-    resume_text = st.text_area(
-        "Resume (plain text)",
-        value=profile.get("resume_text", "") if profile else "",
-        height=420,
-        placeholder="Paste your full resume here...",
-        key="resume_input",
+    # ── Current resume status ─────────────────────────────────────────────────
+    existing_text = (profile.get("resume_text", "") or "") if profile else ""
+    if existing_text:
+        word_count = len(existing_text.split())
+        st.success(f"✅ Resume on file — {word_count:,} words. Upload a new file to replace it.")
+    else:
+        st.warning("No resume on file yet. Upload your PDF or .tex file below.")
+
+    st.divider()
+
+    # ── PRIMARY: File upload (PDF or .tex) ───────────────────────────────────
+    st.write("**Upload resume file**")
+    uploaded = st.file_uploader(
+        "Choose a PDF or LaTeX (.tex) file",
+        type=["pdf", "tex"],
+        help="PDF: any standard resume PDF. LaTeX: .tex source file (LaTeX markup is stripped automatically).",
+        key="resume_upload",
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("💾 Save Resume", use_container_width=True, type="primary"):
-            if resume_text.strip():
-                if _save_profile({"resume_text": resume_text.strip()}, profile.get("id") if profile else None):
-                    st.success("Resume saved!")
-                    st.cache_data.clear()
-            else:
-                st.warning("Nothing to save.")
+    extracted_text = ""
+    if uploaded is not None:
+        file_bytes = uploaded.read()
+        ext = uploaded.name.rsplit(".", 1)[-1].lower()
 
-    with c2:
-        key = _gemini_key()
-        if st.button(
-            "🤖 Analyze with AI",
-            use_container_width=True,
-            disabled=not key or not resume_text.strip(),
-            help="Extracts skills, experience, roles using Gemini" if key else "Set GEMINI_API_KEY first",
-        ):
-            os.environ["GEMINI_API_KEY"] = key
+        with st.spinner(f"Parsing {ext.upper()} file…"):
+            if ext == "pdf":
+                extracted_text = _extract_pdf(file_bytes)
+            elif ext == "tex":
+                extracted_text = _extract_tex(file_bytes)
+
+        if extracted_text:
+            st.success(f"✅ Extracted {len(extracted_text.split()):,} words from **{uploaded.name}**")
+            with st.expander("Preview extracted text (first 800 chars)"):
+                st.text(extracted_text[:800] + ("…" if len(extracted_text) > 800 else ""))
+        else:
+            st.error("Could not extract text from the file. Try a different file or paste manually below.")
+
+    # Action buttons (only active when a file was just uploaded)
+    b1, b2 = st.columns(2)
+    with b1:
+        save_disabled = not extracted_text.strip()
+        if st.button("💾 Save Resume", use_container_width=True, type="primary",
+                     disabled=save_disabled,
+                     help="Upload a file above first" if save_disabled else "Save extracted text to DB"):
+            if _save_profile({"resume_text": extracted_text.strip()},
+                             profile.get("id") if profile else None):
+                st.success("Resume saved!")
+                st.cache_data.clear()
+                profile = _load_profile()
+                st.rerun()
+
+    with b2:
+        gemini_key = _gemini_key()
+        analyze_disabled = not extracted_text.strip() or not gemini_key
+        if st.button("🤖 Save & Analyze with AI", use_container_width=True,
+                     disabled=analyze_disabled,
+                     help="Saves resume and extracts skills / experience / roles using Gemini" if gemini_key else "Set GEMINI_API_KEY first"):
+            os.environ["GEMINI_API_KEY"] = gemini_key
             try:
                 from job_scout.ai.gemini import GeminiClient
                 gemini = GeminiClient()
                 prompt = f"""Analyze this resume and return JSON with:
-- "summary": 2-3 sentence summary
-- "skills": array of technical skills
-- "experience_years": integer
-- "preferred_roles": array of job titles
-- "strengths": array of key strengths
+- "summary": 2-3 sentence professional summary
+- "skills": array of technical skills (languages, frameworks, tools)
+- "experience_years": integer (total years of professional experience)
+- "preferred_roles": array of job titles that best fit this person
+- "strengths": array of 3-5 key professional strengths
 
-Resume:\n{resume_text[:3000]}\n\nReturn ONLY valid JSON."""
-                with st.spinner("Analyzing..."):
+Resume:
+{extracted_text[:3000]}
+
+Return ONLY valid JSON."""
+                with st.spinner("Analyzing with Gemini…"):
                     resp = gemini.generate_json(prompt, max_tokens=1000)
                 if resp:
                     update = {
-                        "resume_text": resume_text.strip(),
-                        "resume_summary": resp.get("summary", ""),
-                        "skills": json.dumps(resp.get("skills", [])),
+                        "resume_text":     extracted_text.strip(),
+                        "resume_summary":  resp.get("summary", ""),
+                        "skills":          json.dumps(resp.get("skills", [])),
                         "experience_years": resp.get("experience_years", 0),
                         "preferred_roles": json.dumps(resp.get("preferred_roles", [])),
                     }
                     if _save_profile(update, profile.get("id") if profile else None):
-                        st.success("Analyzed and saved!")
+                        st.success("✅ Resume saved and analyzed!")
+                        st.cache_data.clear()
+                        profile = _load_profile()
                     else:
-                        st.warning("Analysis complete, but could not persist to DB — check your connection.")
-                    st.write(f"**Summary:** {resp.get('summary', '')}")
-                    st.write(f"**Experience:** ~{resp.get('experience_years', '?')} years")
-                    skills = resp.get("skills", [])
-                    if skills:
-                        st.write(f"**Skills:** {', '.join(skills[:15])}")
-                    roles = resp.get("preferred_roles", [])
-                    if roles:
-                        st.write(f"**Best fit:** {', '.join(roles)}")
-                    profile = _load_profile()
+                        st.warning("Analysis complete but DB save failed — check connection.")
+                    ac1, ac2 = st.columns(2)
+                    ac1.write(f"**Summary:** {resp.get('summary','')}")
+                    ac1.write(f"**Experience:** ~{resp.get('experience_years','?')} years")
+                    if resp.get("skills"):
+                        ac2.write(f"**Skills:** {', '.join(resp['skills'][:15])}")
+                    if resp.get("preferred_roles"):
+                        ac2.write(f"**Best fit:** {', '.join(resp['preferred_roles'])}")
             except Exception as e:
                 st.error(f"AI error: {e}")
 
-    # Show existing analysis
+    # ── FALLBACK: Plain text paste ────────────────────────────────────────────
+    st.divider()
+    with st.expander("✏️ Paste plain text instead (fallback option)"):
+        st.caption("Use this if your file won't upload, or you want to paste a plain-text version.")
+        resume_text_manual = st.text_area(
+            "Resume text",
+            value=existing_text,
+            height=340,
+            placeholder="Paste your full resume here…",
+            key="resume_manual_input",
+        )
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            if st.button("💾 Save text", use_container_width=True, key="save_manual"):
+                if resume_text_manual.strip():
+                    if _save_profile({"resume_text": resume_text_manual.strip()},
+                                     profile.get("id") if profile else None):
+                        st.success("Saved!")
+                        st.cache_data.clear()
+                        profile = _load_profile()
+                        st.rerun()
+                else:
+                    st.warning("Nothing to save.")
+        with mc2:
+            gemini_key2 = _gemini_key()
+            if st.button("🤖 Analyze text", use_container_width=True, key="analyze_manual",
+                         disabled=not resume_text_manual.strip() or not gemini_key2):
+                os.environ["GEMINI_API_KEY"] = gemini_key2
+                try:
+                    from job_scout.ai.gemini import GeminiClient
+                    gemini2 = GeminiClient()
+                    prompt2 = f"""Analyze this resume and return JSON:
+{{"summary":"...","skills":[...],"experience_years":0,"preferred_roles":[...]}}
+
+Resume:\n{resume_text_manual[:3000]}\n\nReturn ONLY valid JSON."""
+                    with st.spinner("Analyzing…"):
+                        resp2 = gemini2.generate_json(prompt2, max_tokens=1000)
+                    if resp2:
+                        update2 = {
+                            "resume_text":      resume_text_manual.strip(),
+                            "resume_summary":   resp2.get("summary", ""),
+                            "skills":           json.dumps(resp2.get("skills", [])),
+                            "experience_years": resp2.get("experience_years", 0),
+                            "preferred_roles":  json.dumps(resp2.get("preferred_roles", [])),
+                        }
+                        if _save_profile(update2, profile.get("id") if profile else None):
+                            st.success("Analyzed and saved!")
+                            profile = _load_profile()
+                except Exception as e:
+                    st.error(f"AI error: {e}")
+
+    # ── Saved analysis display ────────────────────────────────────────────────
     if profile and profile.get("resume_summary"):
         st.divider()
         st.subheader("Saved Analysis")
