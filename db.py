@@ -144,7 +144,7 @@ class Database:
             return False
     
     def get_company_by_name(self, name: str) -> Optional[Dict]:
-        """Find a company by name (case-insensitive)."""
+        """Find a company by name (case-insensitive exact match)."""
         try:
             result = self._request("GET", "companies", params={
                 "name": f"ilike.{name}",
@@ -156,10 +156,39 @@ class Database:
 
     def find_or_create_company(self, name: str, defaults: Dict = None) -> Optional[str]:
         """Find company by name or create it. Returns company ID.
-        Bumps last_seen on existing companies so auto-discovery cadence is visible.
+
+        Dedup logic — two-step lookup:
+          1. Exact case-insensitive match  ("Stripe" == "stripe")
+          2. Normalized match — strips legal suffixes + YC batch tags
+             ("Stripe Inc" == "Stripe", "Linear (YC S20)" == "Linear")
+
+        This prevents the same company appearing twice because one source
+        adds "Stripe" and another adds "Stripe Inc".
         """
         from datetime import date as _date
+        from job_scout.enrichment.dedup import normalize_company_name
+
+        # Step 1: exact match
         existing = self.get_company_by_name(name)
+
+        # Step 2: normalized match — only if exact fails
+        if not existing:
+            norm_input = normalize_company_name(name)
+            if norm_input:
+                # Fetch candidates whose name starts with the first word of norm_input
+                first_word = norm_input.split()[0] if norm_input.split() else norm_input
+                try:
+                    candidates = self._request("GET", "companies", params={
+                        "name": f"ilike.{first_word}%",
+                        "limit": 50,
+                    }) or []
+                    for c in candidates:
+                        if normalize_company_name(c.get("name", "")) == norm_input:
+                            existing = c
+                            break
+                except Exception:
+                    pass
+
         if existing:
             # Bump last_seen_at so auto-discovery cadence is visible
             try:

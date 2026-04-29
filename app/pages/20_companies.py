@@ -337,9 +337,10 @@ with tab_discover:
                     from job_scout.discovery.yc import fetch_yc_companies
                     batch = None if yc_batch == "Recent" else yc_batch
                     companies_yc = fetch_yc_companies(batch=batch, limit=yc_limit)
+                    from job_scout.enrichment.dedup import normalize_company_name
                     existing = db.get_companies(active_only=False, limit=10000)
-                    existing_names = {c["name"].lower() for c in existing}
-                    new = [c for c in companies_yc if c["name"].lower() not in existing_names]
+                    existing_names = {normalize_company_name(c["name"]) for c in existing}
+                    new = [c for c in companies_yc if normalize_company_name(c["name"]) not in existing_names]
                     if new:
                         inserted = db.add_companies_bulk(new)
                         st.success(f"✅ Added {inserted} new YC companies!")
@@ -357,9 +358,10 @@ with tab_discover:
                 try:
                     from job_scout.discovery.alternative import fetch_alternative_sources
                     alt_companies = fetch_alternative_sources()
+                    from job_scout.enrichment.dedup import normalize_company_name
                     existing = db.get_companies(active_only=False, limit=10000)
-                    existing_names = {c["name"].lower() for c in existing}
-                    new = [c for c in alt_companies if (c.get("name") or "").lower() not in existing_names]
+                    existing_names = {normalize_company_name(c["name"]) for c in existing}
+                    new = [c for c in alt_companies if normalize_company_name(c.get("name") or "") not in existing_names]
                     if new:
                         inserted = db.add_companies_bulk(new)
                         st.success(f"✅ Added {inserted} companies!")

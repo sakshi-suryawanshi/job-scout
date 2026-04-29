@@ -36,6 +36,27 @@ def normalize_text(text: str) -> str:
     return text
 
 
+def normalize_company_name(name: str) -> str:
+    """Normalize a company name for dedup comparison.
+
+    Strips legal suffixes and YC batch tags only — does NOT strip seniority
+    words (those are job-title concepts, not company name concepts).
+
+    Examples:
+      "Stripe Inc"          → "stripe"
+      "Acme Corp."          → "acme"
+      "Linear (YC S20)"     → "linear"
+      "OpenAI"              → "openai"
+      "Meta Platforms Inc." → "meta platforms"
+    """
+    text = (name or "").lower().strip()
+    text = _COMPANY_SUFFIXES.sub("", text)
+    text = _YC_BATCH.sub("", text)
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def generate_job_fingerprint(title: str, company_name: str) -> str:
     """SHA256 fingerprint from normalized title + company name."""
     norm_title = normalize_text(title)
