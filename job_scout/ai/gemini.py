@@ -61,10 +61,10 @@ class GeminiClient:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY must be set")
-        self.client = httpx.Client(timeout=60.0)
+        self.client = httpx.Client(timeout=120.0)   # 2 min — Gemini 2.5 Flash thinks before responding
         self.requests_made = 0
 
-    def generate(self, prompt: str, max_tokens: int = 2048,
+    def generate(self, prompt: str, max_tokens: int = 4096,
                  _retry: int = 0) -> Optional[str]:
         """Send a prompt to Gemini and return the text response.
 
@@ -83,7 +83,10 @@ class GeminiClient:
             return "Demo mode — Gemini response mocked. Set DEMO_MODE=false and add GEMINI_API_KEY to enable."
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2},
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": 0.2,
+            },
         }
         try:
             response = self.client.post(f"{GEMINI_API_URL}?key={self.api_key}", json=payload)
@@ -100,18 +103,22 @@ class GeminiClient:
             return None
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                max_retries = 3
+            status = e.response.status_code
+            max_retries = 3
+            if status in (429, 503):
+                # 429 = rate limit   503 = model overloaded (high demand)
+                # Both are temporary — exponential backoff: 30s → 60s → 90s
                 if _retry < max_retries:
-                    wait = 30 * (_retry + 1)   # 30s → 60s → 90s
-                    print(f"  Gemini rate limit — waiting {wait}s before retry {_retry + 1}/{max_retries}")
+                    wait = 30 * (_retry + 1)
+                    reason = "rate limit" if status == 429 else "server overloaded"
+                    print(f"  Gemini {reason} (HTTP {status}) — waiting {wait}s, retry {_retry + 1}/{max_retries}")
                     time.sleep(wait)
                     return self.generate(prompt, max_tokens, _retry=_retry + 1)
-                print("  Gemini rate limit — max retries reached, skipping")
-            elif e.response.status_code == 403:
+                print(f"  Gemini HTTP {status} — max retries reached, skipping")
+            elif status == 403:
                 print("  Gemini API key invalid or quota exhausted for today")
             else:
-                print(f"  Gemini HTTP {e.response.status_code}: {e.response.text[:200]}")
+                print(f"  Gemini HTTP {status}: {e.response.text[:200]}")
             return None
 
         except Exception as e:
@@ -449,7 +456,7 @@ def tailor_resume(gemini: "GeminiClient", resume_text: str, job: Dict, job_descr
         description_section=description_section,
         resume_text=resume_text[:4000],
     )
-    return gemini.generate(prompt, max_tokens=3000)
+    return gemini.generate(prompt, max_tokens=6000)
 
 
 def fetch_job_description(apply_url: str, timeout: int = 10) -> str:
