@@ -255,17 +255,31 @@ with tab_add:
             if not name or not career_url:
                 st.error("Name and Career URL are required.")
             else:
-                result = db.add_company({
-                    "name": name, "career_url": career_url, "website": website or None,
-                    "ats_type": ats_type, "funding_stage": funding_stage or None,
-                    "headcount": headcount if headcount > 0 else None,
-                    "regions": regions, "is_remote_first": is_remote_first,
-                    "source": "manual", "is_active": True, "notes": notes or None, "priority_score": 5,
-                })
-                if result:
-                    st.success(f"✅ Added {name}!")
+                # Dedup check before inserting — same normalized name = same company
+                from job_scout.enrichment.dedup import normalize_company_name
+                norm_input = normalize_company_name(name)
+                existing_match = next(
+                    (c for c in companies if normalize_company_name(c.get("name","")) == norm_input),
+                    None
+                )
+                if existing_match:
+                    st.warning(
+                        f"⚠️ **{existing_match['name']}** is already in the DB "
+                        f"(matches '{name}' after normalizing suffixes). "
+                        f"Not added to avoid duplicates."
+                    )
                 else:
-                    st.error("Failed to add (may be a duplicate name).")
+                    result = db.add_company({
+                        "name": name, "career_url": career_url, "website": website or None,
+                        "ats_type": ats_type, "funding_stage": funding_stage or None,
+                        "headcount": headcount if headcount > 0 else None,
+                        "regions": regions, "is_remote_first": is_remote_first,
+                        "source": "manual", "is_active": True, "notes": notes or None, "priority_score": 5,
+                    })
+                    if result:
+                        st.success(f"✅ Added {name}!")
+                    else:
+                        st.error("Failed to add.")
 
 
 # ── Tab: Bulk Upload ──────────────────────────────────────────────────────────
