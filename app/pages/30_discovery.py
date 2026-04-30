@@ -33,6 +33,21 @@ tab_scrape, tab_daily, tab_dorking, tab_hunt, tab_signals = st.tabs([
 
 # ── Shared criteria loader ────────────────────────────────────────────────────
 def _load_prefs():
+    """Load preferences from disk (primary) or DB (fallback)."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    # Primary: disk
+    _pref_file = _Path(__file__).parent.parent.parent / "data" / "preferences.json"
+    if _pref_file.exists():
+        try:
+            data = _json.loads(_pref_file.read_text())
+            if isinstance(data, dict) and data:
+                return data
+        except Exception:
+            pass
+
+    # Fallback: DB (if preferences column exists)
     try:
         result = db._request("GET", "user_profile", params={"limit": 1})
         prefs = (result[0].get("preferences") or {}) if result else {}
@@ -42,28 +57,42 @@ def _load_prefs():
 
 
 def _save_prefs(criteria: dict) -> bool:
-    """Persist criteria back to user_profile.preferences so the form pre-fills next session.
-    Returns True on success, False on any DB error.
+    """Persist criteria to data/preferences.json (disk) + user_profile DB if possible.
+    Disk is the primary store — works without any DB schema changes.
+    Returns True on success.
     """
+    import json as _json
+    from pathlib import Path as _Path
+
+    prefs_update = {
+        "title_keywords": criteria.get("title_keywords", []),
+        "skills": criteria.get("required_skills", []),
+        "exclude_keywords": criteria.get("exclude_keywords", []),
+        "remote_only": criteria.get("remote_only", True),
+        "global_remote": criteria.get("global_remote_only", True),
+        "max_yoe": criteria.get("max_yoe", 5),
+        "min_salary": criteria.get("min_salary"),
+    }
+
+    # Primary: save to disk (always works, no schema dependency)
+    _pref_file = _Path(__file__).parent.parent.parent / "data" / "preferences.json"
+    try:
+        _pref_file.parent.mkdir(parents=True, exist_ok=True)
+        _pref_file.write_text(_json.dumps(prefs_update, indent=2))
+    except Exception as _e:
+        print(f"_save_prefs disk: {_e}")
+        return False
+
+    # Secondary: also try DB (only works if preferences column exists)
     try:
         result = db._request("GET", "user_profile", params={"limit": 1})
-        if not result:
-            return False
-        prefs_update = {
-            "title_keywords": criteria.get("title_keywords", []),
-            "skills": criteria.get("required_skills", []),
-            "exclude_keywords": criteria.get("exclude_keywords", []),
-            "remote_only": criteria.get("remote_only", True),
-            "global_remote": criteria.get("global_remote_only", True),
-            "max_yoe": criteria.get("max_yoe", 5),
-            "min_salary": criteria.get("min_salary"),
-        }
-        db._request("PATCH", f"user_profile?id=eq.{result[0]['id']}",
-                    json={"preferences": prefs_update})
-        return True
-    except Exception as _e:
-        print(f"_save_prefs: {_e}")
-        return False
+        if result:
+            db._request("PATCH", f"user_profile?id=eq.{result[0]['id']}",
+                        json={"preferences": prefs_update})
+    except Exception:
+        pass   # DB save optional — disk is the source of truth
+
+    return True
 
 def _criteria_form(key_prefix: str):
     prefs = _load_prefs()
