@@ -121,19 +121,47 @@ def apply_to_job(
 def _tailor_resume_for_job(job: Dict, resume_text: str) -> str:
     """Rewrite resume_text for this specific job using Gemini.
     Called only for score ≥ 80 — saves Gemini quota on lower-confidence jobs.
-    Falls back to the original text if Gemini is unavailable or fails.
+    Falls back to the original text IMMEDIATELY if Gemini is unavailable or
+    rate-limited — does NOT retry, because auto-apply cannot block 3 min/job.
     """
     gemini_key = os.getenv("GEMINI_API_KEY", "")
     if not gemini_key or not resume_text:
         return resume_text
     try:
-        from job_scout.ai.gemini import GeminiClient, tailor_resume
-        gemini = GeminiClient(gemini_key)
-        tailored = tailor_resume(gemini, resume_text, job,
-                                  job_description=(job.get("description") or "")[:2000])
-        return tailored or resume_text
+        import httpx
+        from job_scout.ai.gemini import GeminiClient, GEMINI_API_URL, tailor_resume
+        from job_scout.ai.prompts import TAILOR_PROMPT
+
+        # One-shot attempt — no retry. If rate limited, fall back instantly.
+        company_info = job.get("companies", {}) or {}
+        company_name = company_info.get("name", "") or job.get("company_name", "Unknown")
+        desc = (job.get("description") or "")[:2000]
+        description_section = f"- Description excerpt:\n{desc}" if desc.strip() else ""
+        prompt = TAILOR_PROMPT.format(
+            job_title=job.get("title", "Unknown"),
+            company_name=company_name,
+            location=job.get("location", "Remote"),
+            is_remote=job.get("is_remote", True),
+            source_board=job.get("source_board", ""),
+            description_section=description_section,
+            resume_text=resume_text[:4000],
+        )
+        client = httpx.Client(timeout=30.0)
+        resp = client.post(f"{GEMINI_API_URL}?key={gemini_key}", json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 6000, "temperature": 0.2},
+        })
+        if resp.status_code == 200:
+            candidates = resp.json().get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "") or resume_text
+        # Any non-200 (429, 503, etc.) → fall back instantly, no wait
+        print(f"  Tailor resume skipped (HTTP {resp.status_code}) — using original .tex")
+        return resume_text
     except Exception:
-        return resume_text   # graceful degradation — original text still gets submitted
+        return resume_text
 
 
 def _has_gemini_quota(min_remaining: int = 100) -> bool:
@@ -152,14 +180,32 @@ def _has_gemini_quota(min_remaining: int = 100) -> bool:
 
 
 def _generate_cover_letter(job: Dict, resume_text: str) -> str:
+    """Generate cover letter — one-shot, no retry. Returns '' if rate limited."""
     gemini_key = os.getenv("GEMINI_API_KEY", "")
     if not gemini_key or not resume_text:
         return ""
     try:
-        from job_scout.application.manual import _generate_cover_letter
-        from job_scout.ai.gemini import GeminiClient
-        gemini = GeminiClient(gemini_key)
-        return _generate_cover_letter(gemini, job, resume_text)
+        import httpx
+        from job_scout.ai.gemini import GEMINI_API_URL
+        company_info = job.get("companies", {}) or {}
+        company_name = company_info.get("name", "") or job.get("company_name", "Unknown")
+        prompt = f"""Write a concise cover letter (3 short paragraphs, under 200 words) for:
+Role: {job.get('title','?')} at {company_name}
+Candidate background: {resume_text[:800]}
+Rules: facts only, mention role+company, no fluff, plain text."""
+        client = httpx.Client(timeout=20.0)
+        resp = client.post(f"{GEMINI_API_URL}?key={gemini_key}", json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 400, "temperature": 0.3},
+        })
+        if resp.status_code == 200:
+            candidates = resp.json().get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "")
+        print(f"  Cover letter skipped (HTTP {resp.status_code}) — continuing without")
+        return ""
     except Exception:
         return ""
 
