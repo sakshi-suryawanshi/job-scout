@@ -118,8 +118,6 @@ with tab1:
             st.rerun()
 
         if _TEX_PATH.exists():
-            with st.expander("Preview raw .tex source (first 600 chars)"):
-                st.code(_TEX_PATH.read_text(encoding="utf-8", errors="replace")[:600], language="latex")
             if st.button("🗑️ Remove .tex", key="del_tex", use_container_width=True):
                 _TEX_PATH.unlink()
                 st.rerun()
