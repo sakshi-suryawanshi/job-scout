@@ -399,6 +399,65 @@ with tab_scrape:
 
 # ── Tab 2: Serper Dorking (Daily LinkedIn/Indeed merged in as a preset) ─────
 with tab_dorking:
+    # ── Dorking → Jobs funnel: shows what Dorking has produced over time ────
+    with st.expander("📈 **Dorking → Jobs funnel** — see what scoring path your dorked companies follow", expanded=False):
+        try:
+            dork_cos = db._request("GET", "companies", params={
+                "select": "id,name,ats_type,career_url",
+                "source": "eq.serper_dorking",
+                "limit": 5000,
+            }) or []
+        except Exception:
+            dork_cos = []
+
+        if not dork_cos:
+            st.info(
+                "No dorking-sourced companies yet. Run a dork below to populate them. "
+                "Each company you find here gets job-scraped later via ATS scrape or "
+                "Career Hunt — that's where job rows get inserted and **scored**."
+            )
+        else:
+            ats_kinds = {"greenhouse", "lever", "ashby", "workable", "smartrecruiters"}
+            ats_eligible    = [c for c in dork_cos if c.get("ats_type") in ats_kinds]
+            career_eligible = [c for c in dork_cos
+                               if c.get("ats_type") in ("custom", "unknown", None)
+                               and c.get("career_url")]
+            no_url          = [c for c in dork_cos if not c.get("career_url")]
+
+            # Count jobs from dorked companies via local set intersection — robust
+            # against long ID lists and PostgREST quoting edge cases.
+            ats_ids = {c["id"] for c in ats_eligible}
+            cp_ids  = {c["id"] for c in career_eligible}
+            try:
+                all_job_cos = db._request("GET", "jobs", params={
+                    "select": "company_id",
+                    "limit": 10000,
+                }) or []
+                job_ids_set = [j.get("company_id") for j in all_job_cos]
+                jobs_from_ats = sum(1 for cid in job_ids_set if cid in ats_ids)
+                jobs_from_cp  = sum(1 for cid in job_ids_set if cid in cp_ids)
+            except Exception:
+                jobs_from_ats = "?"
+                jobs_from_cp  = "?"
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("🕵️ Companies dorked", len(dork_cos))
+            m2.metric("→ ATS-scrapable",   len(ats_eligible),
+                      help="ats_type ∈ {greenhouse, lever, ashby, workable, smartrecruiters} — picked up by Discovery → Scrape Jobs (ATS checkboxes) or Pipeline Stage 2.")
+            m3.metric("→ Career-pageable", len(career_eligible),
+                      help="ats_type ∈ {custom, unknown} + has career_url — picked up by Career Hunt with 'Also scrape' enabled, or Pipeline career-page stage.")
+            m4.metric("⚠️ No career_url",  len(no_url),
+                      help="LinkedIn/Wellfound profiles etc. that need manual triage.")
+            jt1, jt2 = st.columns(2)
+            jt1.metric("Jobs already harvested via ATS",         jobs_from_ats)
+            jt2.metric("Jobs already harvested via career page", jobs_from_cp)
+
+            st.caption(
+                "**Next step:** run **Discovery → 🚀 Scrape Jobs** (ATS checkboxes enabled) to "
+                "harvest the ATS-scrapable companies, OR **Career Hunt** with 'Also scrape' "
+                "enabled to harvest the rest. Every job upserted will be scored immediately."
+            )
+
     st.subheader("Serper.dev Google Dorking")
     st.caption("Discover hidden companies via targeted Google searches. 2,500 queries/month free.")
 
