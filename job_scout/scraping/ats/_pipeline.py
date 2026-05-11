@@ -74,6 +74,8 @@ def _save_jobs(db, jobs: List[Dict], criteria: Dict) -> int:
         db_job = to_db_job(job, company_id)
         if db.upsert_job(db_job):
             saved += 1
+            from job_scout.ai.gemini import score_and_persist
+            score_and_persist(db, db_job, criteria)
     return saved
 
 
@@ -143,6 +145,8 @@ def scrape_ats_jobs(
                     db_job = to_db_job(job, company_id)
                     if db.upsert_job(db_job):
                         ats_stats["saved"] += 1
+                        from job_scout.ai.gemini import score_and_persist
+                        score_and_persist(db, db_job, criteria)
 
                 if i < len(slugs) - 1:
                     time.sleep(0.2)

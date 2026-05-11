@@ -615,6 +615,18 @@ with tab_hunt:
                         "remote_only": True,
                         "max_yoe": 5,
                     }
+                    # Use the user's saved criteria for scoring (not the minimal
+                    # hunt_criteria used for filtering — those don't include
+                    # must_have_skills / exclude_keywords / etc.).
+                    scoring_criteria = _load_prefs() or hunt_criteria
+                    # Map legacy preference shape to criteria shape
+                    scoring_criteria.setdefault("global_remote_only", scoring_criteria.get("global_remote", True))
+                    scoring_criteria.setdefault(
+                        "nice_to_have_skills",
+                        scoring_criteria.get("nice_to_have_skills") or scoring_criteria.get("skills") or [],
+                    )
+
+                    from job_scout.ai.gemini import score_and_persist
                     jobs_found = 0
                     for co in new_cos[:20]:
                         if co.get("career_url"):
@@ -626,10 +638,11 @@ with tab_hunt:
                                     db_job = to_db_job(job, company_id)
                                     if db.upsert_job(db_job):
                                         jobs_found += 1
+                                        score_and_persist(db, db_job, scoring_criteria)
                             except Exception:
                                 pass
                     if jobs_found:
-                        st.success(f"Found {jobs_found} jobs from career pages!")
+                        st.success(f"Found {jobs_found} jobs from career pages — all scored.")
 
             except ValueError as e:
                 st.error(f"{e}")

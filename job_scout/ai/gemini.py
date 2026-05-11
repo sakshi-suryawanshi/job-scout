@@ -525,6 +525,37 @@ def score_job_rule_based(job: Dict, criteria: Dict) -> Dict:
     return {"score": r["score"], "match_reason": r["match_reason"]}
 
 
+def score_and_persist(db, db_job: Dict, criteria: Dict) -> Optional[Dict]:
+    """Rule-based score for a freshly upserted job, persisted to the DB.
+
+    Use this at every ingest site (board / ATS / career-page / career-hunt) so
+    every scraped job has a rule-based score immediately. Heavy AI refinement
+    still happens in score_all_jobs() batch passes.
+
+    Patches the row identified by `fingerprint` with match_score, match_reason,
+    and is_recommended. Returns the score dict (or None if no fingerprint).
+    Failures are swallowed and logged — never raises.
+    """
+    fingerprint = (db_job or {}).get("fingerprint")
+    if not fingerprint:
+        return None
+    try:
+        r = _compute_score(db_job, criteria)
+        db._request(
+            "PATCH", f"jobs?fingerprint=eq.{fingerprint}",
+            json={
+                "match_score":     r["score"],
+                "match_reason":    r["match_reason"],
+                "is_recommended":  r["score"] >= RECOMMEND_THRESHOLD,
+            },
+        )
+        return r
+    except Exception as e:
+        # Non-fatal: a later batch score_all_jobs() will pick this up.
+        print(f"score_and_persist error ({fingerprint[:12]}…): {e}")
+        return None
+
+
 def score_jobs_batch(gemini: GeminiClient, jobs: List[Dict], criteria: Dict, progress_callback=None) -> List[Dict]:
     scored = []
     batch_size = 10

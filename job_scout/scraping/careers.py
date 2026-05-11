@@ -206,6 +206,8 @@ def scrape_career_pages(db, criteria: Dict = None, max_companies: int = 50, prog
                 db_job = to_db_job(job, company.get("id"))
                 if db.upsert_job(db_job):
                     stats["saved"] += 1
+                    from job_scout.ai.gemini import score_and_persist
+                    score_and_persist(db, db_job, criteria)
             db.update_company(company["id"], {"last_scraped": datetime.now().isoformat()})
             time.sleep(0.5)
         except Exception as e:

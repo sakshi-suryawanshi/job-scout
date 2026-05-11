@@ -250,7 +250,7 @@ def stage_score(db, config: Dict = None) -> Dict:
             db=db,
             criteria=criteria,
             use_ai=use_ai,
-            max_jobs=config.get("max_jobs", 500),
+            max_jobs=config.get("max_jobs", 1000),
         )
         stats["total_scored"] = result.get("scored", 0)
         stats["avg_score"] = result.get("avg_score", 0.0)

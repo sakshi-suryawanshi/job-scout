@@ -249,20 +249,11 @@ def scrape_board_jobs(
                 db_job = to_db_job(job, company_id)
                 if db.upsert_job(db_job):
                     board_stats["saved"] += 1
-                    # Compute rule-based score at ingest so Browse Jobs is useful immediately
-                    try:
-                        from job_scout.ai.gemini import score_job_rule_based
-                        score_result = score_job_rule_based(db_job, criteria)
-                        if score_result.get("score", 0) > 0 and db_job.get("fingerprint"):
-                            db._request(
-                                "PATCH", f"jobs?fingerprint=eq.{db_job['fingerprint']}",
-                                json={
-                                    "match_score": score_result["score"],
-                                    "match_reason": score_result.get("match_reason", ""),
-                                },
-                            )
-                    except Exception:
-                        pass  # Non-fatal — scoring can run in Stage 5 instead
+                    # Universal scoring at ingest — every saved job gets a rule-based
+                    # score (and reason / is_recommended) immediately. Heavy AI
+                    # refinement still happens in score_all_jobs() afterwards.
+                    from job_scout.ai.gemini import score_and_persist
+                    score_and_persist(db, db_job, criteria)
 
             print(f"  Saved {board_stats['saved']} new jobs")
 
