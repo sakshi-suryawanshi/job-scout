@@ -28,6 +28,10 @@ data/*.json
 *.sqlite
 *.sqlite3
 
+# Runtime API usage counters (local-dev fallback; DB is source of truth)
+.streamlit/usage.json
+.streamlit/serper_usage.json
+
 # Claude Code (contains MCP secrets)
 .claude/
 
