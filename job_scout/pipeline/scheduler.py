@@ -36,13 +36,20 @@ _CONFIG_FILE = Path(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))) / "data" / "schedule_config.json"
 
 _DEFAULTS: Dict = {
-    "enabled": True,
-    "run_time": "07:00",          # HH:MM local time
-    "stages": [1, 2, 3, 4, 5, 6, 7, 8],
-    "digest_email": os.getenv("DIGEST_EMAIL", ""),
-    "headless": True,
-    "max_slugs_per_ats": 100,
-    "daily_auto_apply_cap": 50,
+    "enabled":               True,
+    "run_time":              "07:00",          # HH:MM local time
+    "stages":                [1, 2, 3, 4, 5, 6, 7, 8],
+    "digest_email":          os.getenv("DIGEST_EMAIL", ""),
+    "headless":              True,
+    "max_slugs_per_ats":     100,
+    "daily_auto_apply_cap":  50,
+    # New source-coverage overrides — leave unset to use build_config() defaults
+    "ats_types":             None,         # None = all 5 (greenhouse/lever/ashby/workable/smartrecruiters)
+    "serper_categories":     None,         # None = all DORK_QUERIES.keys()
+    "serper_max_q_per_cat":  None,         # None = 2
+    "careers_enabled":       None,         # None = True
+    "max_career_companies":  None,         # None = 30
+    "max_jobs":              None,         # None = 1000
 }
 
 
@@ -66,12 +73,23 @@ def _run_pipeline_now(cfg: Dict) -> None:
     from job_scout.pipeline.daily_run import run_pipeline, build_config
 
     pipeline_cfg = build_config()
-    # Override with schedule config
+    # Override with schedule config — only when the schedule value is set,
+    # otherwise let build_config() defaults win.
     if cfg.get("digest_email"):
         pipeline_cfg["digest_email"] = cfg["digest_email"]
-    pipeline_cfg["headless"] = cfg.get("headless", True)
-    pipeline_cfg["max_slugs_per_ats"] = cfg.get("max_slugs_per_ats", 100)
+    pipeline_cfg["headless"]             = cfg.get("headless", True)
+    pipeline_cfg["max_slugs_per_ats"]    = cfg.get("max_slugs_per_ats", 100)
     pipeline_cfg["daily_auto_apply_cap"] = cfg.get("daily_auto_apply_cap", 50)
+
+    # New source-coverage overrides
+    for key in ("ats_types", "serper_categories", "careers_enabled",
+                "max_career_companies", "max_jobs"):
+        val = cfg.get(key)
+        if val is not None:
+            pipeline_cfg[key] = val
+    smq = cfg.get("serper_max_q_per_cat")
+    if smq is not None:
+        pipeline_cfg["serper_max_queries_per_category"] = smq
 
     stages = cfg.get("stages") or list(range(1, 9))
 

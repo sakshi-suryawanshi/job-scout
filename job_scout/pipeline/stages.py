@@ -167,6 +167,26 @@ def stage_scrape(db, config: Dict = None) -> Dict:
             print(f"  boards scrape error: {e}")
             stats["errors"] += 1
 
+    # Career-page scraping (mirrors Discovery → Career Hunt "Also scrape" + the
+    # "Scrape career pages of DB companies" checkbox).  Picks up custom/unknown
+    # ATS companies that the Stage-1 discovery added.
+    if config.get("careers_enabled", True):
+        try:
+            from job_scout.scraping.careers import scrape_career_pages
+            max_cp = config.get("max_career_companies", 30)
+            cp_stats = scrape_career_pages(db=db, criteria=criteria, max_companies=max_cp)
+            stats["jobs_found"] += cp_stats.get("total_scraped", 0)
+            stats["jobs_new"]   += cp_stats.get("saved", 0)
+            stats["errors"]    += cp_stats.get("errors", 0)
+            stats["by_source"]["careers"] = {
+                "scraped": cp_stats.get("total_scraped", 0),
+                "matched": cp_stats.get("matched", 0),
+                "saved":   cp_stats.get("saved", 0),
+            }
+        except Exception as e:
+            print(f"  careers scrape error: {e}")
+            stats["errors"] += 1
+
     print(f"Stage 2 SCRAPE: {stats['jobs_found']} found, {stats['jobs_new']} new")
     return stats
 
@@ -419,14 +439,26 @@ def _load_criteria(db, config: Dict) -> Dict:
         elif isinstance(raw, list):
             skills = raw
 
+    # New strict-scoring fields. nice_to_have_skills falls back to the legacy
+    # `skills` list so older preferences still work; must_have_skills defaults
+    # to empty (no gate) so the pipeline doesn't accidentally reject everything.
+    nice_to_have = prefs.get("nice_to_have_skills") or skills or []
+    must_have    = prefs.get("must_have_skills") or []
+
     return {
-        "title_keywords": prefs.get("title_keywords", ["backend", "developer", "engineer", "python", "golang"]),
-        "required_skills": skills,
-        "exclude_keywords": prefs.get("exclude_keywords", ["staff", "principal", "director", "vp"]),
-        "remote_only": prefs.get("remote_only", True),
+        "title_keywords":     prefs.get("title_keywords",
+                                        ["backend", "developer", "engineer", "python", "full stack", "fullstack"]),
+        "must_have_skills":   must_have,
+        "nice_to_have_skills": nice_to_have,
+        "required_skills":    nice_to_have,   # legacy alias
+        "exclude_keywords":   prefs.get("exclude_keywords",
+                                        ["staff", "principal", "director", "vp", "head of",
+                                         "senior", "lead", "manager", "intern"]),
+        "remote_only":        prefs.get("remote_only", True),
         "global_remote_only": prefs.get("global_remote", True),
-        "max_yoe": prefs.get("max_yoe", 5),
-        "min_salary": prefs.get("min_salary"),
+        "max_yoe":            prefs.get("max_yoe", 5),
+        "min_salary":         prefs.get("min_salary"),
+        "score_threshold":    prefs.get("score_threshold", 85),
     }
 
 

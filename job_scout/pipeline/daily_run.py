@@ -38,7 +38,27 @@ def _parse_stage_list(env_val: str) -> Optional[List[int]]:
 
 
 def build_config() -> Dict:
-    """Build pipeline config from env vars + sensible defaults."""
+    """Build pipeline config from env vars + sensible defaults.
+
+    Designed to mirror the Discovery UI so the same scrape happens unattended:
+    - All 23 Serper dork categories (capped per category to control credit burn)
+    - All 5 ATS providers (greenhouse, lever, ashby, workable, smartrecruiters)
+    - All boards enabled in data/boards_config.json (75 today)
+    - Career-page scrape over discovered companies
+    """
+    # Default to ALL Serper categories — match the manual Discovery experience.
+    try:
+        from job_scout.discovery.serper_dorking import DORK_QUERIES
+        default_serper_cats = sorted(DORK_QUERIES.keys())
+    except Exception:
+        default_serper_cats = [
+            "linkedin_daily", "indeed_daily",
+            "distress_signals", "funding_signals", "yc_latest",
+            "ats_hiring", "career_pages", "hidden_gems", "regional_gems",
+            "founding_engineer", "tech_stack_specific", "community_boards",
+            "filetype_hidden", "industry_vertical", "culture_filters",
+        ]
+
     return {
         # Discovery
         "yc_enabled":                   True,
@@ -47,22 +67,23 @@ def build_config() -> Dict:
         "remoteintech_enabled":         True,
         "alternative_enabled":          True,
         "serper_enabled":               bool(os.getenv("SERPER_API_KEY")),
-        "serper_categories":            [
-            "linkedin_daily", "indeed_daily",
-            "distress_signals", "funding_signals", "yc_latest",
-        ],
-        "serper_max_queries_per_category": int(os.getenv("SERPER_MAX_Q", "3")),
+        "serper_categories":            default_serper_cats,
+        # Default 2 queries/category × 23 cats ≈ 46 credits/run = ~1400/month.
+        # Plenty of headroom under the 2500 monthly Serper free-tier cap.
+        "serper_max_queries_per_category": int(os.getenv("SERPER_MAX_Q", "2")),
 
-        # Scraping
+        # Scraping (mirrors Discovery → Scrape Jobs defaults)
         "ats_enabled":                  True,
-        "ats_types":                    ["greenhouse", "lever", "ashby"],
+        "ats_types":                    ["greenhouse", "lever", "ashby", "workable", "smartrecruiters"],
         "max_slugs_per_ats":            int(os.getenv("PIPELINE_ATS_SLUGS", "100")),
         "boards_enabled":               True,
-        "boards":                       None,  # None → boards_config.json defaults
+        "boards":                       None,   # None → boards_config.json (all enabled)
+        "careers_enabled":              True,   # scrape career pages of unknown-ATS companies
+        "max_career_companies":         int(os.getenv("PIPELINE_MAX_CAREERS", "30")),
 
         # Scoring
         "use_ai":                       bool(os.getenv("GEMINI_API_KEY")),
-        "max_jobs":                     int(os.getenv("PIPELINE_MAX_JOBS", "500")),
+        "max_jobs":                     int(os.getenv("PIPELINE_MAX_JOBS", "1000")),
         "days":                         90,
 
         # Auto-apply

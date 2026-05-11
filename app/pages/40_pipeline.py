@@ -127,6 +127,61 @@ with tab_schedule:
                 format_func=lambda n: f"Stage {n}: {all_stages[n]}",
             )
 
+        # ── Source coverage — mirror the Discovery UI ───────────────────────
+        st.divider()
+        st.markdown("**Source coverage** — what the pipeline scrapes each run")
+
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            all_ats = ["greenhouse", "lever", "ashby", "workable", "smartrecruiters"]
+            new_ats = st.multiselect(
+                "ATS providers to scrape",
+                options=all_ats,
+                default=cfg.get("ats_types") or all_ats,
+                help="All 5 by default. Each ATS scrapes up to N companies (see slider below).",
+            )
+            new_max_slugs = st.slider(
+                "Max companies per ATS",
+                10, 500, cfg.get("max_slugs_per_ats", 100), step=10,
+            )
+            new_max_jobs = st.slider(
+                "Max jobs to score per run",
+                100, 5000, cfg.get("max_jobs") or 1000, step=100,
+            )
+        with sc2:
+            try:
+                from job_scout.discovery.serper_dorking import DORK_QUERIES
+                all_dork_cats = sorted(DORK_QUERIES.keys())
+            except Exception:
+                all_dork_cats = []
+            new_dork = st.multiselect(
+                "Serper dork categories",
+                options=all_dork_cats,
+                default=cfg.get("serper_categories") or all_dork_cats,
+                help=f"{len(all_dork_cats)} categories available. All enabled by default — same as Discovery → 🕵️ Serper Dorking → Select all.",
+            )
+            new_dork_q = st.slider(
+                "Serper queries per category",
+                1, 5, cfg.get("serper_max_q_per_cat") or 2,
+                help="Total credits/run ≈ this × #categories. Free tier = 2,500/month.",
+            )
+            new_careers = st.checkbox(
+                "Career-page scrape (slow)",
+                value=cfg.get("careers_enabled", True) if cfg.get("careers_enabled") is not None else True,
+                help="Scrapes career pages of discovered unknown-ATS companies. Adds 1-5 min per run.",
+            )
+            new_max_careers = st.slider(
+                "Max career pages",
+                10, 200, cfg.get("max_career_companies") or 30,
+                disabled=not new_careers,
+            )
+
+        est_credits = len(new_dork) * new_dork_q
+        st.caption(
+            f"📊 Estimated Serper credits per run: **~{est_credits}**  "
+            f"(monthly: ~{est_credits * 30} / 2,500 free-tier cap)"
+        )
+
         if st.form_submit_button("💾 Save Schedule", type="primary", use_container_width=True):
             # Validate time format
             try:
@@ -137,13 +192,19 @@ with tab_schedule:
                 st.stop()
 
             new_cfg = {
-                "enabled": new_enabled,
-                "run_time": new_time,
-                "stages": sorted(selected),
-                "digest_email": new_email,
+                "enabled":              new_enabled,
+                "run_time":             new_time,
+                "stages":               sorted(selected),
+                "digest_email":         new_email,
                 "daily_auto_apply_cap": new_cap,
-                "headless": True,
-                "max_slugs_per_ats": 100,
+                "headless":             True,
+                "max_slugs_per_ats":    new_max_slugs,
+                "ats_types":            new_ats,
+                "serper_categories":    new_dork,
+                "serper_max_q_per_cat": new_dork_q,
+                "careers_enabled":      new_careers,
+                "max_career_companies": new_max_careers,
+                "max_jobs":             new_max_jobs,
             }
             _save_cfg(new_cfg)
             st.success("Schedule saved! The scheduler will pick this up within 30 seconds.")
@@ -166,15 +227,17 @@ python -m job_scout.pipeline.scheduler
 with tab_run:
     st.subheader("Manual Pipeline Run")
     st.markdown("""
-The full 8-stage pipeline:
-1. **Discover** — YC + remoteintech + Serper dorking
-2. **Scrape** — all enabled ATS + boards
-3. **Enrich** — desperation scoring
-4. **Classify** — multi-label job categories
-5. **Score** — rule-based pre-filter → Gemini AI
-6. **Auto-Apply** — evaluate rules, tag queued jobs (Playwright apply in Step 6)
-7. **Follow-Ups** — find overdue applications
+The full 8-stage pipeline (mirrors what the Discovery page does manually):
+1. **Discover** — YC batches + remoteintech + alternative seeds + **all 23 Serper dork categories** + your scheduled Career-Hunt queries
+2. **Scrape** — **all 5 ATS providers** (greenhouse / lever / ashby / workable / smartrecruiters) + **all 75 enabled job boards** + **career-page scrape** for unknown-ATS companies
+3. **Enrich** — desperation signals (multi-board posting, urgent language, small-company, long-open, distress/funding)
+4. **Classify** — multi-label job categories (backend / frontend / data / devops / AI / ...)
+5. **Score** — gate-then-rank rule pipeline (must-have skills, exclude keywords, YOE, India location) + Gemini AI refinement on top 50
+6. **Auto-Apply** — rules engine evaluates queued jobs, Playwright submits to Tier-1 ATS
+7. **Follow-Ups** — find applied jobs past their follow-up window
 8. **Digest** — compose + email daily summary
+
+All source coverage is configurable in the **Schedule** tab above — uncheck anything you want to skip.
     """)
 
     c1, c2 = st.columns(2)
