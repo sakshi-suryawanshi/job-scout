@@ -199,6 +199,79 @@ def _job_card(job, *, show_actions=True, key_prefix="jc"):
 # ── Page ─────────────────────────────────────────────────────────────────────
 st.title("💼 Jobs")
 
+# ── Score audit — show that scoring is working, at a glance ─────────────────
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_score_audit(limit: int = 50):
+    """Recent jobs with their score + gate/reason. TTL=30s so a fresh scrape
+    surfaces within half a minute. Click the 🔄 button to force-refresh."""
+    try:
+        return db._request("GET", "jobs", params={
+            "select": "id,title,match_score,match_reason,is_recommended,source_board,discovered_at,companies(name)",
+            "order": "discovered_at.desc",
+            "limit": limit,
+        }) or []
+    except Exception as e:
+        st.error(f"Score audit query failed: {e}")
+        return []
+
+with st.expander("📊 **Score audit** — verify scoring is happening", expanded=False):
+    audit_left, audit_right = st.columns([1, 6])
+    if audit_left.button("🔄 Refresh", key="audit_refresh"):
+        _load_score_audit.clear()
+        st.rerun()
+    recent = _load_score_audit(limit=200)
+    if not recent:
+        st.info("No jobs in DB yet. Run a scrape from Discovery → 🚀 Scrape Jobs.")
+    else:
+        # Distribution
+        b85 = sum(1 for j in recent if (j.get("match_score") or 0) >= 85)
+        b70 = sum(1 for j in recent if 70 <= (j.get("match_score") or 0) < 85)
+        b50 = sum(1 for j in recent if 50 <= (j.get("match_score") or 0) < 70)
+        b1  = sum(1 for j in recent if 1 <= (j.get("match_score") or 0) < 50)
+        b0  = sum(1 for j in recent if (j.get("match_score") or 0) == 0)
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("⭐ ≥85",   b85)
+        m2.metric("🟡 70-84", b70)
+        m3.metric("🟠 50-69", b50)
+        m4.metric("🔴 1-49",  b1)
+        m5.metric("⚫ Gated/0", b0)
+
+        st.caption(
+            f"Of the **{len(recent)}** most-recently-discovered jobs, **{b85}** are "
+            f"must-apply (score ≥ 85). Gated jobs (score 0) are usually fine — the gate "
+            f"reason in the table below tells you why each was rejected."
+        )
+
+        # Show top 20 by score, then 5 most-recent gated for debugging
+        sorted_jobs = sorted(recent, key=lambda j: -(j.get("match_score") or 0))
+        top = sorted_jobs[:20]
+        gated = [j for j in recent if (j.get("match_score") or 0) == 0][:5]
+
+        if top:
+            st.write("**Top 20 by score (most recent 200 jobs)**")
+            rows = [{
+                "Score":   j.get("match_score") or 0,
+                "⭐":      "⭐" if j.get("is_recommended") else "",
+                "Title":   (j.get("title") or "")[:60],
+                "Company": ((j.get("companies") or {}) or {}).get("name", "")[:30],
+                "Source":  j.get("source_board") or "",
+                "Why":     (j.get("match_reason") or "")[:120],
+            } for j in top]
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+        if gated:
+            st.write("**Sample of gated jobs (score=0) — confirms gates are firing**")
+            rows = [{
+                "Title":   (j.get("title") or "")[:60],
+                "Company": ((j.get("companies") or {}) or {}).get("name", "")[:30],
+                "Source":  j.get("source_board") or "",
+                "Gated because": (j.get("match_reason") or "")[:120],
+            } for j in gated]
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+st.divider()
+
 tab_queue, tab_all, tab_saved, tab_applied, tab_followups, tab_attention = st.tabs([
     "🚀 Apply Queue", "📋 All Jobs", "💾 Saved", "✅ Applied", "🔔 Follow-Ups", "⚠️ Needs Attention"
 ])

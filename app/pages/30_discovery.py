@@ -626,8 +626,9 @@ with tab_hunt:
                         scoring_criteria.get("nice_to_have_skills") or scoring_criteria.get("skills") or [],
                     )
 
-                    from job_scout.ai.gemini import score_and_persist
+                    from job_scout.ai.gemini import score_and_persist, RECOMMEND_THRESHOLD
                     jobs_found = 0
+                    scored_rows = []
                     for co in new_cos[:20]:
                         if co.get("career_url"):
                             try:
@@ -638,11 +639,28 @@ with tab_hunt:
                                     db_job = to_db_job(job, company_id)
                                     if db.upsert_job(db_job):
                                         jobs_found += 1
-                                        score_and_persist(db, db_job, scoring_criteria)
+                                        r = score_and_persist(db, db_job, scoring_criteria)
+                                        if r:
+                                            scored_rows.append({
+                                                "Score": r["score"],
+                                                "⭐": "⭐" if r["score"] >= RECOMMEND_THRESHOLD else "",
+                                                "Title":   (db_job.get("title") or "")[:60],
+                                                "Company": (co.get("name") or "")[:30],
+                                                "Why":     (r.get("match_reason") or "")[:140],
+                                            })
                             except Exception:
                                 pass
                     if jobs_found:
-                        st.success(f"Found {jobs_found} jobs from career pages — all scored.")
+                        ge = sum(1 for r in scored_rows if r["Score"] >= RECOMMEND_THRESHOLD)
+                        st.success(
+                            f"Found **{jobs_found}** jobs from career pages — all scored. "
+                            f"**{ge}** scored ≥ {RECOMMEND_THRESHOLD} ⭐"
+                        )
+                        if scored_rows:
+                            scored_rows.sort(key=lambda r: -r["Score"])
+                            st.dataframe(scored_rows, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No jobs matched your filter on the scraped career pages.")
 
             except ValueError as e:
                 st.error(f"{e}")
