@@ -150,32 +150,10 @@ class GeminiClient:
             return None
 
 
-SCORING_PROMPT = """Score this job against the candidate's criteria. Return JSON.
-
-**Candidate criteria:**
-- Title keywords: {title_keywords}
-- Required skills: {required_skills}
-- Preferred remote: {remote_only}
-- Max years of experience: {max_yoe}
-- Extra conditions: {extra_conditions}
-
-**Job details:**
-- Title: {job_title}
-- Company: {company_name}
-- Location: {location}
-- Remote: {is_remote}
-- Source: {source_board}
-- Description: {description}
-
-Return this exact JSON format:
-{{
-    "score": <0-100 integer>,
-    "match_reason": "<1-2 sentence explanation>",
-    "signals": {{"title_match": <0-25>, "skills_match": <0-25>, "remote_match": <0-25>, "experience_match": <0-25>}}
-}}
-
-Scoring: 80-100=strong, 60-79=decent, 40-59=partial, 20-39=weak, 0-19=poor.
-JSON response:"""
+# SCORING_PROMPT and BATCH_SCORING_PROMPT live in job_scout/ai/prompts.py
+# (canonical source). Import here so score_job_with_ai() uses the calibrated
+# version with the same gate logic as the rule pipeline.
+from job_scout.ai.prompts import SCORING_PROMPT  # noqa: E402
 
 TAILOR_PROMPT = """You are an expert resume writer. Tailor the candidate's resume for a specific job.
 
