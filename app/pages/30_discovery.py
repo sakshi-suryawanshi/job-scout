@@ -26,8 +26,8 @@ _gemini_key = os.getenv("GEMINI_API_KEY", "")
 st.title("🔍 Discovery")
 st.caption("Find new jobs and companies from all sources in one place.")
 
-tab_scrape, tab_daily, tab_dorking, tab_hunt, tab_signals = st.tabs([
-    "🚀 Scrape Jobs", "⚡ Daily (LinkedIn/Indeed)", "🕵️ Serper Dorking", "🏭 Career Hunt", "📡 Signals"
+tab_scrape, tab_dorking, tab_hunt, tab_signals = st.tabs([
+    "🚀 Scrape Jobs", "🕵️ Serper Dorking", "🏭 Career Hunt", "📡 Signals"
 ])
 
 
@@ -158,35 +158,36 @@ with tab_scrape:
 
     with sc2:
         st.caption("**Job Boards**")
-        from job_scout.scraping.boards._orchestrator import _get_enabled_boards
-        _ALL_KEYS = [
-            "remoteok","remotive","remotive_devops","remotive_data","weworkremotely","wwr_devops",
-            "wwr_frontend","himalayas","arbeitnow","themuse","justjoin","hackernews","hackernews_jobs",
-            "reddit","reddit_remotejs","jobicy","jobicy_all","workingnomads","workingnomads_devops",
-            "jobspresso","wfhio","remoteco","authenticjobs","nodesk","4dayweek","dynamitejobs",
-            "freshremote","remotefirstjobs","devitjobs","djangojobs","larajobs","vuejobs","golangjobs",
-            "smashingmag","cryptojobslist","web3career","climatebase","powertofly",
-            "cord","wellfound","hired","talentio","pallet",
-        ]
-        _enabled = set(_get_enabled_boards(_ALL_KEYS))
-        def _on(k): return k in _enabled
+        # Registry-driven: every board registered in _all_boards_registry() shows
+        # up here automatically. Initial-checked state comes from boards_config.json.
+        from job_scout.scraping.boards._orchestrator import (
+            _all_boards_registry, _get_enabled_boards,
+        )
+        _registry = _all_boards_registry({})
+        _all_keys = sorted(_registry.keys(), key=lambda k: _registry[k][0].lower())
+        _enabled = set(_get_enabled_boards(_all_keys))
+
+        col_select_all, col_clear = st.columns(2)
+        if col_select_all.button("Select all", key="b_sel_all", use_container_width=True):
+            for k in _all_keys:
+                st.session_state[f"b_{k}"] = True
+            st.rerun()
+        if col_clear.button("Clear", key="b_clear", use_container_width=True):
+            for k in _all_keys:
+                st.session_state[f"b_{k}"] = False
+            st.rerun()
 
         board_checks = {}
-        for key, label in [
-            ("remoteok","RemoteOK"),("remotive","Remotive"),("weworkremotely","WeWorkRemotely"),
-            ("himalayas","Himalayas"),("arbeitnow","Arbeitnow"),("justjoin","JustJoin.it"),
-            ("hackernews","HN Who's Hiring"),("hackernews_jobs","HN Job Stories"),
-            ("jobicy","Jobicy"),("jobicy_all","Jobicy all"),("workingnomads","WorkingNomads"),
-            ("jobspresso","Jobspresso"),("wfhio","WFH.io"),("remoteco","Remote.co"),
-            ("authenticjobs","Authentic Jobs"),("nodesk","NodeDesk"),("4dayweek","4DayWeek"),
-            ("dynamitejobs","Dynamite Jobs"),("freshremote","Fresh Remote"),
-            ("remotefirstjobs","Remote First Jobs"),("devitjobs","DevITjobs EU"),
-            ("djangojobs","DjangoJobs"),("golangjobs","GolangJobs"),
-            ("cord","Cord.co"),("wellfound","Wellfound"),("hired","Hired.com"),
-            ("talentio","Talent.io"),("pallet","Pallet"),
-            ("cryptojobslist","CryptoJobsList"),("climatebase","ClimateBase"),
-        ]:
-            board_checks[key] = st.checkbox(label, value=_on(key), key=f"b_{key}")
+        # Show all boards in a scrollable container so 70+ checkboxes don't overwhelm the page.
+        with st.container(height=420):
+            for key in _all_keys:
+                label = _registry[key][0]
+                board_checks[key] = st.checkbox(
+                    f"{label}  `{key}`",
+                    value=st.session_state.get(f"b_{key}", key in _enabled),
+                    key=f"b_{key}",
+                )
+        st.caption(f"{sum(board_checks.values())} / {len(_all_keys)} boards selected")
 
     career_pages = st.checkbox("Scrape career pages of DB companies (slow)", value=False)
     max_cp = st.slider("Max career pages", 10, 100, 30) if career_pages else 30
@@ -208,9 +209,24 @@ with tab_scrape:
 
         progress = st.progress(0)
         status = st.empty()
-        grand = {"total_scraped": 0, "matched": 0, "saved": 0, "errors": 0}
+        grand = {"total_scraped": 0, "matched": 0, "saved": 0, "errors": 0, "by_board": {}}
         phases = sum([bool(ats_types), bool(boards), career_pages])
         phase = 0
+
+        def _merge_by_board(grand_dict, stats_dict, default_key="other"):
+            """Merge a phase's by_board dict into grand. ATS/career phases get
+            a single composite key since they don't report per-source counts."""
+            by_board = stats_dict.get("by_board") or {}
+            if by_board:
+                for k, v in by_board.items():
+                    bucket = grand_dict["by_board"].setdefault(k, {"scraped": 0, "matched": 0, "saved": 0})
+                    for kk in ("scraped", "matched", "saved"):
+                        bucket[kk] += int(v.get(kk, 0) or 0)
+            else:
+                bucket = grand_dict["by_board"].setdefault(default_key, {"scraped": 0, "matched": 0, "saved": 0})
+                bucket["scraped"] += int(stats_dict.get("total_scraped", 0) or 0)
+                bucket["matched"] += int(stats_dict.get("matched", 0) or 0)
+                bucket["saved"]   += int(stats_dict.get("saved", 0) or 0)
 
         if ats_types:
             status.write("**Scraping ATS boards...**")
@@ -220,8 +236,9 @@ with tab_scrape:
                     status.write(f"ATS: {msg}")
                 stats = scrape_ats_jobs(db=db, ats_types=[ats], criteria=criteria, max_slugs_per_ats=max_slugs, progress_callback=_ap)
                 for k, v in stats.items():
-                    if k in grand:
-                        grand[k] = grand[k] + (v if isinstance(v, int) else 0)
+                    if k in grand and isinstance(grand[k], int):
+                        grand[k] += (v if isinstance(v, int) else 0)
+                _merge_by_board(grand, stats, default_key=f"ats:{ats}")
             phase += 1
 
         if boards:
@@ -231,8 +248,9 @@ with tab_scrape:
                 status.write(f"Boards: {msg}")
             stats = scrape_board_jobs(db=db, boards=boards, criteria=criteria, progress_callback=_bp)
             for k, v in stats.items():
-                if k in grand:
-                    grand[k] = grand[k] + (v if isinstance(v, int) else 0)
+                if k in grand and isinstance(grand[k], int):
+                    grand[k] += (v if isinstance(v, int) else 0)
+            _merge_by_board(grand, stats)
             phase += 1
 
         if career_pages:
@@ -242,8 +260,9 @@ with tab_scrape:
                 status.write(f"Career pages: {msg}")
             stats = scrape_career_pages(db=db, criteria=criteria, max_companies=max_cp, progress_callback=_cp)
             for k, v in stats.items():
-                if k in grand:
-                    grand[k] = grand[k] + (v if isinstance(v, int) else 0)
+                if k in grand and isinstance(grand[k], int):
+                    grand[k] += (v if isinstance(v, int) else 0)
+            _merge_by_board(grand, stats, default_key="career_pages")
 
         progress.progress(1.0)
         status.write("**Done!**")
@@ -256,6 +275,33 @@ with tab_scrape:
             st.success(f"Added {grand['saved']} new jobs! Go to Jobs → Apply Queue.")
             st.balloons()
 
+        # ── Per-board breakdown ──────────────────────────────────────────────
+        from job_scout.scraping.boards._orchestrator import _all_boards_registry as _reg_fn
+        _reg = _reg_fn({})
+        rows = []
+        for k, bs in grand["by_board"].items():
+            display_name = _reg[k][0] if k in _reg else k
+            rows.append({
+                "Board":   display_name,
+                "Key":     k,
+                "Scraped": bs["scraped"],
+                "Matched": bs["matched"],
+                "Saved":   bs["saved"],
+            })
+        rows.sort(key=lambda r: (-r["Saved"], -r["Scraped"]))
+
+        if rows:
+            st.divider()
+            st.subheader(f"📊 Per-board breakdown ({len(rows)} sources)")
+            empty = [r for r in rows if r["Scraped"] == 0]
+            if empty:
+                st.caption(
+                    f"⚠️ **{len(empty)} board(s) returned 0 jobs** — likely a wrong feed URL or rate-limit. "
+                    f"Check `_extra.py` for: {', '.join(r['Key'] for r in empty[:8])}"
+                    + ("…" if len(empty) > 8 else "")
+                )
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
         # Score new jobs
         from job_scout.ai.gemini import score_all_jobs
         if _gemini_key and grand["saved"] > 0:
@@ -265,73 +311,7 @@ with tab_scrape:
             st.info(f"Scored {score_result['scored']} jobs (avg {score_result['avg_score']}).")
 
 
-# ── Tab 2: Daily Discovery ────────────────────────────────────────────────────
-with tab_daily:
-    st.subheader("LinkedIn + Indeed Daily Discovery")
-    st.caption("Pulls fresh job listings from LinkedIn and Indeed via Google dorking. ~20 Serper credits/run. 1-day cooldown.")
-
-    if not _serper_available:
-        st.warning("SERPER_API_KEY not set. Add it to your .env or Streamlit secrets.")
-    else:
-        try:
-            from job_scout.discovery.serper_dorking import get_serper_usage, is_category_on_cooldown
-            s = get_serper_usage()
-            pct = s["calls_this_month"] / s["limit"]
-            st.progress(min(pct, 1.0), text=f"Serper: {s['calls_this_month']}/{s['limit']} this month ({s['remaining']} left)")
-
-            li_cd, li_days = is_category_on_cooldown("linkedin_daily")
-            in_cd, in_days = is_category_on_cooldown("indeed_daily")
-            cc1, cc2 = st.columns(2)
-            with cc1:
-                st.warning(f"LinkedIn: cooldown ({li_days}d ago)") if li_cd else st.success("LinkedIn: ready")
-            with cc2:
-                st.warning(f"Indeed: cooldown ({in_days}d ago)") if in_cd else st.success("Indeed: ready")
-        except Exception:
-            pass
-
-        rc1, rc2, rc3 = st.columns(3)
-        run_li = rc1.checkbox("LinkedIn daily", value=True, key="d_li")
-        run_in = rc2.checkbox("Indeed daily", value=True, key="d_in")
-        force_d = rc3.checkbox("Force re-run (ignore cooldown)", key="d_force")
-        results_per_q = st.slider("Results per query", 5, 20, 10, key="d_rpq")
-        cats = (["linkedin_daily"] if run_li else []) + (["indeed_daily"] if run_in else [])
-
-        if st.button("⚡ Run Daily Discovery", type="primary", use_container_width=True, disabled=not cats):
-            from job_scout.discovery.serper_dorking import SerperDorker, create_signal_from_result
-            with st.spinner("Running…"):
-                try:
-                    dorker = SerperDorker()
-                    total_companies, sig_count = 0, 0
-                    for cat in cats:
-                        companies_found = dorker.run_dork_category(cat, results_per_query=results_per_q, force=force_d)
-                        db_companies = [dorker.to_db_format(c) for c in companies_found]
-                        existing = {c["name"].lower() for c in db.get_companies(active_only=False, limit=10000)}
-                        new_cos = [c for c in db_companies if (c.get("name") or "").lower() not in existing]
-                        if new_cos:
-                            total_companies += db.add_companies_bulk(new_cos)
-                        # Auto-save signals from Daily Discovery (item 17)
-                        for company in companies_found:
-                            src_cat = company.get("source_category", "")
-                            if src_cat in {"distress", "funding", "hidden", "regional"}:
-                                try:
-                                    sig = create_signal_from_result(company, src_cat)
-                                    if db.add_signal(sig):
-                                        sig_count += 1
-                                except Exception:
-                                    pass
-                    msg = f"Added **{total_companies}** new companies from LinkedIn/Indeed"
-                    if sig_count:
-                        msg += f" + **{sig_count}** signals saved"
-                    st.success(
-                        msg + ". Job listings will be scraped in the next pipeline run "
-                        "(or use the **Scrape Jobs** tab now)."
-                    )
-                except Exception as e:
-                    st.error(f"Error: {e}")
-                    import traceback; st.code(traceback.format_exc())
-
-
-# ── Tab 3: Serper Dorking ─────────────────────────────────────────────────────
+# ── Tab 2: Serper Dorking (Daily LinkedIn/Indeed merged in as a preset) ─────
 with tab_dorking:
     st.subheader("Serper.dev Google Dorking")
     st.caption("Discover hidden companies via targeted Google searches. 2,500 queries/month free.")
@@ -346,10 +326,47 @@ with tab_dorking:
 
         st.divider()
 
-        all_cats = list(DORK_QUERIES.keys())
+        all_cats = sorted(DORK_QUERIES.keys())
         default_cats = ["distress_signals", "funding_signals", "hidden_gems", "yc_latest", "ats_hiring"]
 
-        selected_cats = st.multiselect("Select dork categories", all_cats, default=default_cats)
+        # New categories added in the 2026-05 audit — surface them so the user
+        # discovers them without having to scan the dropdown.
+        new_cats = ["founding_engineer", "tech_stack_specific", "community_boards",
+                    "filetype_hidden", "industry_vertical", "culture_filters"]
+        new_present = [c for c in new_cats if c in all_cats]
+        total_dorks = sum(len(v) for v in DORK_QUERIES.values())
+        st.caption(
+            f"📚 **{len(all_cats)} categories · {total_dorks} dorks** total. "
+            + (f"✨ **{len(new_present)} new categories** available — "
+               + ", ".join(f"`{c}`" for c in new_present)
+               if new_present else "")
+        )
+
+        # Buttons to seed the selection. "📅 Daily" also flags an auto-run on
+        # the next rerun (preserves the old Daily-tab one-click workflow).
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        if bc1.button("Default 5", use_container_width=True, key="dork_seed_default"):
+            st.session_state["dork_selected"] = default_cats
+            st.rerun()
+        if bc2.button("✨ Add new 6", use_container_width=True, key="dork_seed_new"):
+            current = st.session_state.get("dork_selected", default_cats)
+            st.session_state["dork_selected"] = sorted(set(current) | set(new_present))
+            st.rerun()
+        if bc3.button("Select all", use_container_width=True, key="dork_seed_all"):
+            st.session_state["dork_selected"] = all_cats
+            st.rerun()
+        if bc4.button("📅 Daily LinkedIn+Indeed", use_container_width=True, key="dork_seed_daily",
+                      help="One-click preset: runs linkedin_daily + indeed_daily immediately (1-day cooldown, auto-saves signals)."):
+            st.session_state["dork_selected"] = ["linkedin_daily", "indeed_daily"]
+            st.session_state["dork_auto_run_daily"] = True
+            st.rerun()
+
+        selected_cats = st.multiselect(
+            "Select dork categories",
+            all_cats,
+            default=st.session_state.get("dork_selected", default_cats),
+            key="dork_selected_widget",
+        )
         results_per = st.slider("Results per query", 5, 20, 10, key="dork_rpq")
         max_q = st.slider("Max queries per category", 1, 10, 3, key="dork_mq")
         force = st.checkbox("Force (ignore cooldowns)", key="dork_force")
@@ -367,17 +384,24 @@ with tab_dorking:
                 msg = f"on cooldown ({days_ago}d ago)" if on_cd else "ready"
                 st.caption(f"{icon} **{cat}**: {msg}")
 
-        if st.button("🔎 Run Dorking", type="primary", use_container_width=True, disabled=not selected_cats):
+        def _run_dorking(cats_to_run, results_per_q, max_q_per_cat, force_run, save_signals):
+            """Shared run path for both the explicit Run button and the Daily preset.
+            max_q_per_cat=None means 'no per-category cap' (Daily preset uses this)."""
             from job_scout.discovery.serper_dorking import SerperDorker, create_signal_from_result
             progress = st.progress(0)
             status_txt = st.empty()
             try:
                 dorker = SerperDorker()
                 all_companies = []
-                for i, cat in enumerate(selected_cats):
-                    status_txt.write(f"Category: **{cat}** ({i+1}/{len(selected_cats)})")
-                    progress.progress((i + 1) / len(selected_cats))
-                    companies = dorker.run_dork_category(cat, max_queries=max_q, results_per_query=results_per, force=force)
+                for i, cat in enumerate(cats_to_run):
+                    status_txt.write(f"Category: **{cat}** ({i+1}/{len(cats_to_run)})")
+                    progress.progress((i + 1) / len(cats_to_run))
+                    companies = dorker.run_dork_category(
+                        cat,
+                        **({"max_queries": max_q_per_cat} if max_q_per_cat else {}),
+                        results_per_query=results_per_q,
+                        force=force_run,
+                    )
                     all_companies.extend(companies)
 
                 db_companies = [dorker.to_db_format(c) for c in all_companies]
@@ -386,9 +410,9 @@ with tab_dorking:
 
                 inserted = db.add_companies_bulk(new_cos) if new_cos else 0
 
-                if save_sigs:
+                sig_count = 0
+                if save_signals:
                     signal_cats = {"distress", "funding", "hidden", "regional", "hackernews", "indiehackers"}
-                    sig_count = 0
                     for company in all_companies:
                         cat_found = company.get("source_category", "")
                         if cat_found in signal_cats:
@@ -398,12 +422,37 @@ with tab_dorking:
 
                 progress.progress(1.0)
                 status_txt.write("**Done!**")
-                st.success(f"Found {len(all_companies)} results → {inserted} new companies added. {sig_count if save_sigs else 0} signals saved.")
+                st.success(
+                    f"Found {len(all_companies)} results → {inserted} new companies added. "
+                    f"{sig_count if save_signals else 0} signals saved."
+                )
                 st.write(f"Serper queries used: **{dorker.queries_used}**")
             except ValueError as e:
                 st.error(f"{e}")
             except Exception as e:
                 st.error(f"Error: {e}")
+                import traceback; st.code(traceback.format_exc())
+
+        # Auto-run path: triggered by the 📅 Daily preset button. Uses 1-day-cooldown
+        # categories with auto-signal-saving on and no per-category query cap.
+        if st.session_state.pop("dork_auto_run_daily", False):
+            st.info("📅 Running Daily LinkedIn+Indeed preset…")
+            _run_dorking(
+                cats_to_run=["linkedin_daily", "indeed_daily"],
+                results_per_q=10,
+                max_q_per_cat=None,
+                force_run=False,
+                save_signals=True,
+            )
+
+        if st.button("🔎 Run Dorking", type="primary", use_container_width=True, disabled=not selected_cats):
+            _run_dorking(
+                cats_to_run=selected_cats,
+                results_per_q=results_per,
+                max_q_per_cat=max_q,
+                force_run=force,
+                save_signals=save_sigs,
+            )
 
 
 # ── Tab 4: Career Hunt ────────────────────────────────────────────────────────

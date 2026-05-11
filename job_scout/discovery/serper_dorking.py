@@ -37,6 +37,12 @@ _COOLDOWN_DAYS = 7
 CATEGORY_COOLDOWNS = {
     "linkedin_daily": 1,
     "indeed_daily": 1,
+    "founding_engineer":    3,
+    "tech_stack_specific":  7,
+    "community_boards":     7,
+    "filetype_hidden":     14,
+    "industry_vertical":    7,
+    "culture_filters":     14,
 }
 
 
@@ -121,6 +127,18 @@ def _build_dork_queries() -> dict:
             # SmartRecruiters — auto-discovers new companies on this ATS
             ('site:jobs.smartrecruiters.com "remote" "engineer"', "smartrecruiters"),
             ('site:jobs.smartrecruiters.com "backend" "startup"', "smartrecruiters"),
+            # Breezy HR — EU SMB ATS
+            ('site:breezy.hr "remote" "engineer" "startup"', "breezy"),
+            # Recruitee — Dutch ATS, EU startups
+            ('site:recruitee.com "Software Engineer" "Remote" "Immediate Start"', "recruitee"),
+            # Teamtailor — Nordic/EU ATS
+            ('site:teamtailor.com "remote" "python" OR "go" developer -india', "teamtailor"),
+            # Join.com — German ATS, mid-size EU
+            ('site:join.com "remote" "developer" -India -MNC', "join"),
+            # Employment Hero (SWAG) — AU/APAC SMB ATS
+            ('site:app.swagapp.com "remote" "python" OR "engineer" developer', "swagapp"),
+            # Dice.com — US tech-heavy aggregator
+            ('site:dice.com "Urgent" "Python" OR "FastAPI" "Remote"', "dice"),
         ],
         "job_boards": [
             ('site:wellfound.com "1-10 employees" "remote" "engineer"', "wellfound"),
@@ -139,6 +157,15 @@ def _build_dork_queries() -> dict:
             ('intitle:"open positions" "remote" "startup" "backend"', "career_page"),
             ('"we\'re hiring" "remote" "early stage" "engineer" -linkedin', "career_page"),
             ('"join us" "remote" "seed funded" "developer"', "career_page"),
+            # Explicit FAANG-exclusion + mid-size targeting
+            ('"software engineer" "fully remote" ("mid-size" OR "growing team" OR "eager to hire") -faang -google -amazon -microsoft', "career_page"),
+            # SMB terminology — different keyword from "startup"
+            ('intitle:"hiring" OR intitle:"careers" "remote developer" ("small team" OR SMB OR startup) -india', "career_page"),
+            ('inurl:careers "remote" "software engineer" "small and medium" OR "smb"', "career_page"),
+            # "Tight-knit team" phrasing
+            ('intitle:"remote" "software engineer" "small company" OR "tight-knit team"', "career_page"),
+            # Force company sites, exclude big aggregators
+            ('("join our team" OR "we\'re looking for") "software engineer" remote -india -site:linkedin.com -site:indeed.com', "career_page"),
         ],
         "distress_signals": [
             ('site:news.ycombinator.com "who is hiring" "remote" "backend"', "hackernews"),
@@ -146,6 +173,8 @@ def _build_dork_queries() -> dict:
             ('site:indiehackers.com "looking for" "developer" OR "engineer"', "indiehackers"),
             ('site:indiehackers.com "need help" "developer" "growing"', "indiehackers"),
             ('"growing fast" "need engineer" "remote" "startup" -enterprise', "distress"),
+            # "scaling the team" — common late-seed phrasing
+            ('"scaling the team" "software engineer" python remote -india', "distress"),
         ],
         "funding_signals": [
             (f'"raised" "seed" "million" "hiring" "remote" {yr}', "funding"),
@@ -154,6 +183,10 @@ def _build_dork_queries() -> dict:
             (f'site:techcrunch.com "raises" "seed" {yr} "remote"', "funding"),
             (f'"just raised" "hiring" "engineer" "remote" {yr}', "funding"),
             (f'"recently funded" "hiring" "developer" "remote" {yr}', "funding"),
+            # zero-to-one phrasing — very-early-stage
+            ('"zero-to-one" "software engineer" "remote" "startup"', "funding"),
+            # Series A + Founding combo
+            ('"Series A" "Remote" "Software Engineer" "Founding"', "funding"),
         ],
         "hidden_gems": [
             ('"hiring" "remote" "developer" "africa" startup -linkedin', "hidden"),
@@ -172,6 +205,10 @@ def _build_dork_queries() -> dict:
             ('"hiring" "remote" "developer" "kenya" OR "nigeria" OR "ghana" startup', "regional"),
             ('"hiring" "remote" "developer" "estonia" OR "portugal" OR "poland" startup', "regional"),
             ('"hiring" "remote" "engineer" "singapore" OR "indonesia" startup', "regional"),
+            # Explicit EMEA / LATAM blocs
+            ('intitle:"job" "backend" "python" remote ("EMEA" OR "LATAM")', "regional"),
+            # SimplyHired — US-centric but yields some global remote
+            ('site:simplyhired.com "remote" "software engineer" "startup" "anywhere"', "simplyhired"),
         ],
         "yc_latest": [
             (f'site:news.ycombinator.com "YC W{str(y)[-2:]} OR YC S{str(y)[-2:]}" "hiring" "remote"', "yc"),
@@ -244,10 +281,81 @@ def _build_dork_queries() -> dict:
             ('site:indeed.com "remote" "django" OR "fastapi" developer startup', "indeed"),
             ('site:indeed.com "global remote" "software engineer" "seed" OR "series a"', "indeed"),
         ],
+
+        # ── NEW: founding-engineer roles (highest desperation segment) ───────
+        "founding_engineer": [
+            ('"Founding Engineer" "Remote" "Apply Now" -LinkedIn -india', "founding"),
+            ('"first engineering hire" "remote" "software developer" "immediate start" -india', "founding"),
+            ('"looking for our first engineer" "remote" "anywhere" -india', "founding"),
+            ('"first backend hire" "python" remote -india', "founding"),
+            ('site:breezy.hr "Founding Engineer" "Remote" "Anywhere"', "founding"),
+            ('"founding engineer" "django" OR "rails" OR "node" remote -india', "founding"),
+        ],
+
+        # ── NEW: tech-stack-specific niches ──────────────────────────────────
+        "tech_stack_specific": [
+            ('site:ashbyhq.com "Full Stack" "Supabase" "Remote" -india', "tech"),
+            ('site:breezy.hr "Node.js" "NestJS" "Remote" "Immediate" -india', "tech"),
+            ('site:whoishiring.jobs "Rust" "Remote" -india', "tech"),
+            ('site:whoishiring.jobs "Terraform" "AWS" "Remote" -india', "tech"),
+            ('site:dice.com "Urgent" "Python" "FastAPI" "Remote" -india', "tech"),
+            ('intitle:"Backend Engineer" "low latency" "remote" "global" -india', "tech"),
+        ],
+
+        # ── NEW: community-maintained boards (Notion / Trello / Sheets) ──────
+        "community_boards": [
+            ('site:notion.site "Jobs" "Remote" "Software Engineer" -india', "notion"),
+            ('site:notion.so "Hiring" "Software Engineer" "Remote" -india', "notion"),
+            ('site:trello.com "Jobs" "Remote" "Python" -india', "trello"),
+            ('site:docs.google.com/spreadsheets "Hiring" "Remote" "Developer" -india', "google_sheet"),
+        ],
+
+        # ── NEW: job descriptions hidden in PDFs/docs on company sites ───────
+        "filetype_hidden": [
+            ('"hiring" "remote" "software engineer" "startup" (filetype:pdf OR filetype:docx) -india', "filetype"),
+            ('filetype:pdf "remote software engineer" "requirements" "international" -india', "filetype"),
+        ],
+
+        # ── NEW: industry-vertical targeting (AI / Web3 / D2C) ───────────────
+        "industry_vertical": [
+            ('"fast growing" "AI startup" "remote" "software engineer" -india', "ai"),
+            ('"AI Trainer" "Software Developer" "Remote" "Immediate" -india', "ai"),
+            ('site:breezy.hr "crypto" "remote" "founding engineer" -india', "web3"),
+            ('site:ashbyhq.com "D2C" "scaling" "remote" "Next.js" -india', "d2c"),
+        ],
+
+        # ── NEW: engineering-culture filters ─────────────────────────────────
+        "culture_filters": [
+            ('"no whiteboard interview" "remote" "software engineer" "global" -india', "culture"),
+            ('"distributed team" OR "async remote" "software engineer" hiring -india', "culture"),
+        ],
     }
 
 
 DORK_QUERIES = _build_dork_queries()
+
+
+# ---------------------------------------------------------------------------
+# Global India exclusion — appended to every Serper query.
+#
+# User requirement: globally remote jobs only, no India-based postings.
+# Centralised here so we don't have to maintain `-india ...` on every dork.
+# Edit this constant to add/remove excluded locations.
+# ---------------------------------------------------------------------------
+GLOBAL_EXCLUSIONS = (
+    "-india -bangalore -bengaluru -mumbai -delhi -pune -hyderabad "
+    "-chennai -kolkata -noida -gurugram -gurgaon -ahmedabad"
+)
+
+
+def _apply_global_exclusions(query: str) -> str:
+    """Append GLOBAL_EXCLUSIONS to a query unless it already contains '-india'.
+
+    Idempotent — running twice on the same string is a no-op.
+    """
+    if " -india" in f" {query.lower()}":
+        return query  # already excluded explicitly
+    return f"{query} {GLOBAL_EXCLUSIONS}"
 
 
 class SerperDorker:
@@ -261,6 +369,9 @@ class SerperDorker:
     def search(self, query: str, num_results: int = 10) -> List[Dict]:
         if _is_demo_mode():
             return []  # Return empty in demo mode — no real searches
+        # Enforce globally-remote-only by appending India-location exclusions
+        # to every query unless one is already present.
+        query = _apply_global_exclusions(query)
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
         try:
             response = self.client.post(SERPER_API_URL, json={"q": query, "num": num_results}, headers=headers)

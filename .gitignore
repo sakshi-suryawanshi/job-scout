@@ -49,3 +49,5 @@ jobs_cache/
 notes.txt
 v2_notes.md
 V2_PLAN.md
+
+.planning/*

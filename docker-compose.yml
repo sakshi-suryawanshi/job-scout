@@ -12,6 +12,10 @@ services:
     volumes:
       - ./.streamlit:/app/.streamlit:rw
       - ./data:/app/data
+      # Live-reload source code — Streamlit picks up Python edits automatically.
+      - ./app:/app/app
+      - ./job_scout:/app/job_scout
+      - ./db.py:/app/db.py
     restart: unless-stopped
 
   # ── Daily pipeline scheduler ────────────────────────────────────────────────
@@ -32,6 +36,9 @@ services:
     volumes:
       - ./data:/app/data          # shares schedule_config.json + screenshots
       - ./.streamlit:/app/.streamlit:rw  # shares quota tracking files
+      # Live source — pipeline restart picks up code edits without rebuild.
+      - ./job_scout:/app/job_scout
+      - ./db.py:/app/db.py
     restart: unless-stopped
     # Playwright needs a writable /tmp for Chromium
     tmpfs:

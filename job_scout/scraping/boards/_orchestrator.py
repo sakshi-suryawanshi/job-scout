@@ -27,10 +27,25 @@ from job_scout.scraping.boards._community import HackerNewsScraper, RedditScrape
 from job_scout.scraping.boards._salary import (
     CordScraper, WellfoundScraper, HiredScraper, TalentioScraper, PalletScraper,
 )
+from job_scout.scraping.boards._extra import (
+    # Easy tier
+    PythonOrgJobsScraper, BerlinStartupJobsScraper, SkipTheDriveScraper,
+    PyJobsScraper, HiringCafeScraper, EchoJobsScraper, LandingJobsScraper,
+    # Medium tier
+    TheHubScraper, StartupJobsCZScraper, GermanTechJobsScraper,
+    SwissDevJobsScraper, RelocateMeScraper, CryptocurrencyJobsCoScraper,
+    DiversifyTechScraper, StartupSuchtScraper, JustRemoteScraper,
+    DailyRemoteScraper, RemoteYeahScraper, RemoteBackendJobsScraper,
+    RemoteFrontendJobsScraper, RealWorkFromAnywhereScraper, RemoteesScraper,
+    OSSJobsScraper, JSPythonGoRemotelyScraper, BuiltInScraper,
+    Remote100kScraper, TechHireScraper, JobanniScraper, FindJobsDevScraper,
+    DevJobsProScraper, OneRemoteJobsScraper, JobsRemoteAIScraper,
+    SlasifyScraper, PangianScraper,
+)
 
 _BOARDS_CONFIG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))))),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))),
     "data", "boards_config.json",
 )
 
@@ -109,6 +124,44 @@ def _all_boards_registry(criteria: Dict = None) -> dict:
         "hired":                ("Hired.com",             lambda: HiredScraper().get_jobs(limit=80)),
         "talentio":             ("Talent.io",             lambda: TalentioScraper().get_jobs(limit=80)),
         "pallet":               ("Pallet Boards",         lambda: PalletScraper().get_jobs(limit=100)),
+
+        # ── Tier 1: Easy (RSS / JSON) ────────────────────────────────
+        "python_jobs":          ("Python.org Jobs",       lambda: PythonOrgJobsScraper().get_jobs()),
+        "berlin_startup_jobs":  ("Berlin Startup Jobs",   lambda: BerlinStartupJobsScraper().get_jobs()),
+        "skipthedrive":         ("SkipTheDrive",          lambda: SkipTheDriveScraper().get_jobs()),
+        "pyjobs":               ("PyJobs",                lambda: PyJobsScraper().get_jobs()),
+        "hiring_cafe":          ("Hiring.cafe",           lambda: HiringCafeScraper().get_jobs(limit=100)),
+        "echojobs":             ("EchoJobs",              lambda: EchoJobsScraper().get_jobs(limit=100)),
+        "landing_jobs":         ("Landing.jobs",          lambda: LandingJobsScraper().get_jobs(limit=100)),
+
+        # ── Tier 2: Medium (probable RSS) ────────────────────────────
+        "the_hub":              ("The Hub",               lambda: TheHubScraper().get_jobs()),
+        "startupjobs_cz":       ("StartupJobs.com",       lambda: StartupJobsCZScraper().get_jobs()),
+        "germantechjobs":       ("GermanTechJobs",        lambda: GermanTechJobsScraper().get_jobs()),
+        "swissdevjobs":         ("SwissDev Jobs",         lambda: SwissDevJobsScraper().get_jobs()),
+        "relocate_me":          ("Relocate.me",           lambda: RelocateMeScraper().get_jobs()),
+        "cryptocurrencyjobs_co":("CryptocurrencyJobs.co", lambda: CryptocurrencyJobsCoScraper().get_jobs()),
+        "diversify_tech":       ("Diversify Tech",        lambda: DiversifyTechScraper().get_jobs()),
+        "startup_sucht":        ("Startup Sucht",         lambda: StartupSuchtScraper().get_jobs()),
+        "justremote":           ("JustRemote",            lambda: JustRemoteScraper().get_jobs()),
+        "dailyremote":          ("DailyRemote",           lambda: DailyRemoteScraper().get_jobs()),
+        "remoteyeah":           ("RemoteYeah",            lambda: RemoteYeahScraper().get_jobs()),
+        "remote_backend_jobs":  ("Remote Backend Jobs",   lambda: RemoteBackendJobsScraper().get_jobs()),
+        "remote_frontend_jobs": ("Remote Frontend Jobs",  lambda: RemoteFrontendJobsScraper().get_jobs()),
+        "realworkfromanywhere": ("Real Work From Anywhere", lambda: RealWorkFromAnywhereScraper().get_jobs()),
+        "remotees":             ("Remotees",              lambda: RemoteesScraper().get_jobs()),
+        "ossjobs":              ("OSSJobs.dev",           lambda: OSSJobsScraper().get_jobs()),
+        "js_python_go_remotely":("JS/Python/Go Remotely", lambda: JSPythonGoRemotelyScraper().get_jobs()),
+        "builtin":              ("Built In",              lambda: BuiltInScraper().get_jobs()),
+        "remote100k":           ("Remote100k",            lambda: Remote100kScraper().get_jobs()),
+        "techhire":             ("TechHire.ai",           lambda: TechHireScraper().get_jobs()),
+        "jobanni":              ("Jobanni",               lambda: JobanniScraper().get_jobs()),
+        "findjobs_dev":         ("findjobs.dev",          lambda: FindJobsDevScraper().get_jobs()),
+        "devjobs_pro":          ("DevJobs.pro",           lambda: DevJobsProScraper().get_jobs()),
+        "oneremotejobs":        ("OneRemoteJobs",         lambda: OneRemoteJobsScraper().get_jobs()),
+        "jobsremote_ai":        ("JobsRemote.ai",         lambda: JobsRemoteAIScraper().get_jobs()),
+        "slasify":              ("Slasify",               lambda: SlasifyScraper().get_jobs()),
+        "pangian":              ("Pangian",               lambda: PangianScraper().get_jobs()),
     }
 
 
