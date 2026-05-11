@@ -1,0 +1,267 @@
+\documentclass[a4paper,11.5pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[top=0.65in, bottom=0.65in, left=0.7in, right=0.7in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{needspace}
+\usepackage{microtype}
+
+%% Titles = deep navy | Highlights = near-black bold | Links = subtle navy (clickable but quiet)
+\definecolor{titlenavy}{RGB}{15,32,65}
+\definecolor{linknavy}{RGB}{28,65,130}
+\definecolor{black}{RGB}{0,0,0}
+\definecolor{hgray}{RGB}{30,30,30}
+\newcommand{\h}[1]{\textbf{\textcolor{hgray}{#1}}}
+
+\hypersetup{colorlinks=true, linkcolor=linknavy, urlcolor=linknavy, citecolor=linknavy}
+
+\titleformat{\section}{\large\bfseries\color{titlenavy}}{}{0em}{}[\color{titlenavy}\titlerule]
+\titlespacing{\section}{0pt}{11pt}{5pt}
+\titleformat{\subsection}{\normalsize\bfseries\color{titlenavy}}{}{0em}{}
+\titlespacing{\subsection}{0pt}{8pt}{2pt}
+
+\pagenumbering{gobble}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{3pt}
+\setlist[itemize]{leftmargin=*, itemsep=0.18em, topsep=3pt, parsep=0pt}
+
+\begin{document}
+
+%% ── HEADER ───────────────────────────────────────────────────────────────────
+\begin{center}
+  {\huge\textbf{Sakshi Suryawanshi}}\\[0.28em]
+  {\large Full Stack Software Engineer}\\[0.45em]
+  \begin{tabular}{r@{\enspace\textbar\enspace}c@{\enspace\textbar\enspace}l}
+    \href{mailto:sakshi.suryawanshi520@gmail.com}{sakshi.suryawanshi520@gmail.com}
+      & India
+      & Open to global remote opportunities \\[0.15em]
+    \href{https://sakshi-suryawanshi.vercel.app/}{Portfolio}
+      & \href{https://github.com/sakshi-suryawanshi}{GitHub}
+      & \href{https://www.linkedin.com/in/sakshi-suryawanshi-21b11819b/}{LinkedIn}
+  \end{tabular}
+\end{center}
+
+\vspace{0.4em}
+
+%% ── PROFESSIONAL PROFILE ─────────────────────────────────────────────────────
+\section*{Professional Profile}
+Full Stack Software Engineer with 2+ years of production experience across backend systems, REST APIs, analytical data platforms, and cloud infrastructure. Currently contributing to a multi-tenant asset performance management SaaS at \textbf{Eightgen AI}, building \textbf{Python/FastAPI} microservices, \textbf{ClickHouse}-backed analytics, and an AI conversational analytics service on \textbf{LangGraph + Google Vertex AI Gemini}. Previously at \textbf{Wassha Inc.\ (Japan)}, independently owned and shipped a supply chain management platform end-to-end, mentored 6 engineers, and delivered measurable improvements in system performance, deployment speed, and reliability. Experience spans responsive web applications, real-time features with WebSockets, full-stack performance optimisation, automated CI/CD, and AWS infrastructure management. Comfortable in \textbf{AI-augmented development workflows} (Claude Code, Cursor, GitHub Copilot), async-first remote teams, and international collaboration across time zones, with a proven ability to drive architectural improvements and produce clear technical documentation.
+
+\vspace{0.4em}
+
+%% ── KEY ACHIEVEMENTS ─────────────────────────────────────────────────────────
+\section*{Key Achievements}
+\begin{itemize}
+  \item \h{Multi-Tenant Security Hardening} — Closed a critical cross-tenant exposure path in Eightgen's APS scoring service by enforcing \texttt{client\_id} isolation across every ClickHouse analytical query
+  \item \h{AI Conversational Analytics (in design)} — Architecting a Text-to-SQL microservice on LangGraph + Google Vertex AI Gemini with a 9-layer SQL safety stack (AST validation, RBAC, tenant isolation, deny-by-default allowlists)
+  \item \h{40\% Performance Improvement} — Optimised full-stack systems through query optimisation, legacy code refactoring, and frontend performance enhancements across production endpoints
+  \item \h{3x Reduction in Production Incidents} — Proposed and implemented AWS Application Load Balancer enhancements on an inherited legacy monolith, transforming service reliability
+  \item \h{20\% Faster Deployments} — Designed and implemented CI/CD pipelines using Docker and Kubernetes, automating build and deployment workflows end to end
+  \item \h{6 Engineers Mentored} — Led structured onboarding, regular code reviews, and pair programming sessions; cut average ramp-up time by 50\%
+  \item \h{Real-time at Scale} — Built WebSocket and Socket.io-based communication systems delivering sub-second notifications to thousands of concurrent users
+  \item \h{95\% ML Model Accuracy} — Developed speech emotion recognition system on 8,000+ audio samples; published research as a peer-reviewed book chapter
+  \item \h{9.54/10 CGPA} — Graduated with Honours in Data Science from Computer Science Engineering program
+\end{itemize}
+
+\vspace{0.4em}
+
+%% ── PROFESSIONAL EXPERIENCE ──────────────────────────────────────────────────
+\section*{Professional Experience}
+
+{\large\bfseries\textcolor{titlenavy}{Software Engineer (Contract)}} \hfill \textbf{Mar 2026 \textendash{} Present}\\
+\textbf{Eightgen AI} \textbar{} \textit{Remote}
+\hfill \textit{Asset Performance Management SaaS — manufacturing industry client}\\[0.2em]
+\textit{Stack:} Python, FastAPI, Pydantic, SQLAlchemy, asyncpg, PostgreSQL, ClickHouse, React~19, TypeScript, TanStack, pytest-bdd, GitHub Actions, LangGraph, Google Vertex AI Gemini, sqlglot
+
+\vspace{0.3em}
+\textit{\textbf{\textcolor{titlenavy}{\small Backend \& Data Platform}}}
+\begin{itemize}
+  \item Hardened \h{multi-tenant data isolation} across the APS execution engine by injecting \texttt{client\_id} filters throughout every \h{ClickHouse} analytical query, and resolved ClickHouse-specific correctness issues (FINAL-keyword deduplication, JSONB type coercion for asyncpg) — closing a critical cross-tenant exposure path in the scoring service
+  \item Architected the end-to-end \h{benchmark lifecycle} with \h{copy-on-write versioning} (clone $\rightarrow$ DRAFT $\rightarrow$ ACTIVE), status transitions, default initialization, and administrative overrides on a multi-tenant PostgreSQL schema, enabling safe iteration on scoring rules without disrupting live benchmarks
+  \item Eliminated \h{N+1 queries} in the scoring data transformation pipeline via a bulk-UPDATE strategy over JSONB-embedded quarterly period scores, and rewrote \texttt{list\_results} as a \h{single-pass query} with a composite index, materially reducing dashboard latency under multi-tenant load
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Full-Stack Dashboards \& Quality}}}
+\begin{itemize}
+  \item Delivered interactive \h{score-trend visualizations} and a historical-results browser (filters, pagination, insight-name resolution) in \h{React~19 / TypeScript / TanStack}, backed by ClickHouse analytics served through FastAPI, plus a UX guard dialog preventing invalid analysis periods on the APS execute page
+  \item Authored \h{pytest-bdd} end-to-end scenario coverage across RBAC, tenant isolation, and calculation correctness; produced Technical Approach Documents for benchmark management, score-trend charts, and scenario gap analysis
+  \item Restored reliability in \h{GitHub Actions CI/CD} deploy workflows by injecting missing service URL and webhook environment variables; narrowed exception handling in admin invitation flows
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small AI / LLM Engineering}}} \textit{\small (in progress)}
+\begin{itemize}
+  \item Designing a \h{multi-tenant AI Conversational Analytics microservice} on \h{LangGraph} StateGraph agents running against \h{Google Vertex AI Gemini} (Flash Lite / Flash / Pro routing), with a Text-to-SQL pipeline secured by a \h{9-layer safety stack} — sqlglot AST validation, deny-by-default allowlists, RBAC column authorization, and tenant filter injection
+  \item Specifying \h{conversation persistence} (PostgreSQL checkpointer for LangGraph state), \h{SSE streaming} response delivery, and a full query audit log for compliance and drill-downs
+\end{itemize}
+
+\vspace{0.4em}
+
+{\large\bfseries\textcolor{titlenavy}{Full Stack Software Engineer}} \hfill \textbf{Mar 2024 \textendash{} Jan 2026}\\
+\textbf{Wassha Inc., Japan} \textbar{} \textit{Remote (software department fully remote)}
+\hfill \textit{Energy-access technology, operations across East Africa}\\[0.2em]
+\textit{Stack:} Python, Django, ReactJS, TypeScript, NestJS, Node.js, MySQL, PostgreSQL, Redis, AWS (EC2, RDS, S3, Redshift, Glue), Docker, Kubernetes, Pulumi, WebSockets, Socket.io, CI/CD, Nginx, Gunicorn, CloudWatch, Grafana Loki, Apache Superset, Android Studio
+
+\vspace{0.3em}
+\textit{\textbf{\textcolor{titlenavy}{\small Full Stack System Ownership \& Delivery}}}
+\begin{itemize}
+  \item \h{Independently owned and delivered} a full-stack supply chain management platform, overseeing the complete development lifecycle including frontend UI/UX, backend APIs, database design, deployment, monitoring, and post-release support
+  \item Contributed to \h{3 internal production projects concurrently}, demonstrating adaptability across frontend and backend codebases while maintaining high code quality and system stability
+  \item Collaborated with cross-functional teams to deliver \h{business-critical features} consumed internally and by customer-facing mobile applications serving \h{thousands of users}
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Backend Architecture \& API Development}}}
+\begin{itemize}
+  \item \h{Independently owned} the full backend lifecycle of the supply chain platform, covering API design using \h{Django REST Framework} and \h{NestJS}, database schema, deployment, and post-release monitoring
+  \item Designed and developed \h{RESTful APIs} with Django REST Framework and NestJS, ensuring proper authentication, validation, and error handling throughout
+  \item Optimised \h{MySQL and PostgreSQL} schemas with strategic indexing and eliminated redundant queries across high-traffic reporting endpoints, contributing to a \h{40\% improvement} in overall system response time
+  \item Applied strategic \h{database indexing and query optimisation} techniques to significantly improve response times for high-traffic endpoints and reporting modules
+  \item Proposed and implemented \h{AWS Application Load Balancer} enhancements on an inherited legacy monolith, reducing production incident frequency by \h{over 3x} and significantly improving service reliability
+  \item Designed and implemented \h{Redis caching} strategies to reduce database load and improve API response times across frequently accessed endpoints
+  \item Proposed and led the \h{migration of two repositories from Django to NestJS}; integrated multiple third-party APIs, improving system modularity and long-term maintainability
+  \item Assumed \h{full ownership} of a critical production data pipeline incident where a schema change caused Redshift ingestion failures and broken analytics dashboards; diagnosed root cause, restored data consistency, fixed affected AWS Glue jobs, and authored a \h{post-mortem} to prevent recurrence
+  \item Architected \h{dynamic country-aware credential handling} logic, replacing hardcoded configurations with a scalable, maintainable solution deployed across multiple regions
+  \item Contributed to \h{unit and integration testing} across backend services using pytest; maintained \h{Swagger/OpenAPI} documentation for all API endpoints
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Frontend Architecture \& Performance}}}
+\begin{itemize}
+  \item Built \h{reusable ReactJS and TypeScript component library} (dynamic forms, data tables, interactive dashboards) with code splitting and lazy loading, reducing frontend development time across 3 concurrent projects
+  \item Implemented \h{frontend performance optimisations} including code splitting, lazy loading, and efficient state management, contributing to the overall 40\% system performance improvement
+  \item Optimised \h{JavaScript execution and DOM manipulation} to reduce page load times and improve user experience across the platform
+  \item Built reusable component libraries following best practices for \h{maintainability and scalability}
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Real-time Communication \& Event-Driven Features}}}
+\begin{itemize}
+  \item Integrated \h{Socket.io} to deliver \h{sub-second real-time notifications} and live status updates for \h{thousands of concurrent users}, replacing a polling-based approach and reducing unnecessary server load
+  \item Developed and integrated \h{WebSocket-based real-time communication} features for instant notifications, live status updates, and bidirectional event-driven communication
+  \item Built \h{event-driven architecture} supporting real-time updates across multiple concurrent users and sessions
+  \item Designed and implemented \h{connection management, reconnection logic, and error handling} for WebSocket communications to ensure reliability under variable network conditions
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Database Design \& Management}}}
+\begin{itemize}
+  \item Designed \h{relational database schemas} for MySQL and PostgreSQL, ensuring normalisation, referential integrity, and optimal query performance
+  \item Implemented \h{Redis caching} strategies to reduce database load and improve API response times across frequently accessed endpoints
+  \item Managed \h{data pipelines involving AWS Redshift} for analytics workloads, including schema migrations and pipeline maintenance
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small DevOps, Cloud \& Reliability}}}
+\begin{itemize}
+  \item Designed and implemented \h{CI/CD pipelines} using \h{Docker and Kubernetes}, automating build and deployment workflows and reducing delivery time by \h{20\%}
+  \item Managed \h{AWS infrastructure} across EC2, RDS, S3, Redshift, and Glue for production applications, analytics workloads, and data pipelines
+  \item Developed and maintained \h{Kubernetes deployment workflows} for batch processing jobs, ensuring reliable and repeatable deployment cycles
+  \item Monitored system health and debugged production issues via \h{CloudWatch and Grafana Loki}, enhancing system observability and improving incident response times
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Leadership \& Mentorship}}}
+\begin{itemize}
+  \item \h{Mentored 6 junior engineers} through structured onboarding programs covering both frontend and backend development, regular code reviews, and collaborative pair programming — cutting average ramp-up time by \h{50\%}
+  \item Led complex full-stack initiatives including \h{multiple third-party API integrations} and strategic repository migration from Django to NestJS
+  \item Authored and maintained \h{comprehensive developer documentation} for frontend components, backend APIs, and deployment runbooks, improving onboarding efficiency and ensuring long-term system maintainability
+  \item Conducted multiple \h{internal knowledge transfer sessions} on full-stack development workflows, React best practices, and production debugging
+  \item Contributed to \h{sprint planning and backlog prioritisation} in an async-first remote team, effectively balancing business-critical features with technical maintenance
+\end{itemize}
+
+\vspace{0.25em}
+\textit{\textbf{\textcolor{titlenavy}{\small Mobile App Testing}}}
+\begin{itemize}
+  \item Conducted \h{manual testing of mobile applications} using Android Studio, identifying and reporting UI/UX issues and functional bugs
+  \item Collaborated with mobile development teams to ensure \h{consistent user experience} across web and Android platforms
+\end{itemize}
+
+\vspace{0.25em}
+\href{https://drive.google.com/file/d/1AuP7vLRyYTY9FCFMkKeHPjfmX7vIQ1EI/view}{\textit{Recommendation Letter}} from Head of Software Engineering
+\enspace\textbar\enspace
+\href{https://drive.google.com/file/d/1u_2WggSeq51spYo9Z1i9dRnutalUn4dO/view?usp=drive_link}{\textit{Experience Letter}} issued by Wassha Inc., Japan
+
+\vspace{0.4em}
+
+%% ── TECHNICAL SKILLS ─────────────────────────────────────────────────────────
+\section*{Technical Skills}
+\textbf{Languages:} Python, JavaScript, TypeScript, Java, SQL \\[0.18em]
+\textbf{Backend \& APIs:} FastAPI, Pydantic, SQLAlchemy, async/await, asyncpg, Django, Django REST Framework, Flask, Node.js, Express.js, NestJS, REST APIs, GraphQL, Celery, WebSockets, Socket.io, SSE streaming \\[0.18em]
+\textbf{Databases:} PostgreSQL, ClickHouse, MySQL, SQLite, MongoDB, Redis, AWS Redshift \\[0.18em]
+\textbf{Frontend:} React (19), NextJS, TypeScript, TanStack, HTML5, CSS3, TailwindCSS, Bootstrap, ES6+, component architecture, state management \\[0.18em]
+\textbf{Cloud \& DevOps:} AWS (EC2, RDS, S3, Lambda, Redshift, Glue), GCP (Cloud Run, Cloud SQL, GCS — familiarity), Docker, Kubernetes, Pulumi, GitHub Actions, CI/CD, Nginx, Gunicorn \\[0.18em]
+\textbf{AI / LLM Engineering:} LangGraph, Google Vertex AI Gemini, OpenAI, Anthropic, Text-to-SQL, sqlglot, RAG patterns, prompt engineering, multi-layer SQL safety validation \\[0.18em]
+\textbf{AI-Augmented Development:} Claude Code, Cursor, GitHub Copilot, AI-assisted code review and refactoring \\[0.18em]
+\textbf{Real-time Technologies:} WebSockets, Socket.io, SSE, event-driven architecture, real-time data synchronisation \\[0.18em]
+\textbf{Testing \& Observability:} pytest, pytest-bdd, unit and integration testing, CloudWatch, Grafana Loki, Apache Superset, Swagger/OpenAPI, Git, GitHub, Jira, VS Code, Android Studio \\[0.18em]
+\textbf{Core Competencies:} System design, microservices architecture, multi-tenant SaaS, data isolation \& RBAC, async API design, query optimisation, technical documentation, Agile/Scrum, Data Structures and Algorithms, OOP, database schema design
+
+\vspace{0.4em}
+
+%% ── PROJECTS ─────────────────────────────────────────────────────────────────
+\section*{Projects}
+
+\subsection*{Task Management System \hfill \href{https://github.com/sakshi-suryawanshi/task-management-system}{GitHub}}
+\textit{Personal Project} \textbar{} Python, Django REST Framework, MySQL, Redis, Celery, Docker, JWT, Swagger
+\begin{itemize}[topsep=2pt]
+  \item \h{Architected and developed} a scalable backend system for task and project management utilising Django REST Framework
+  \item Implemented \h{JWT-based authentication with RBAC} for secure, role-aware user management across teams, projects, and task hierarchies
+  \item Integrated \h{Celery and Redis} for async background processing including automated email notifications and scheduled tasks
+  \item \h{Containerised the full application stack} (MySQL, Redis, Nginx, Gunicorn, Celery) using Docker Compose for reproducible local and production environments
+  \item Created interactive \h{Swagger/OpenAPI documentation} covering all API endpoints with request/response schemas
+  \item Designed \h{relational database schema} with optimised queries for tasks, projects, teams, notifications, and activity logs
+\end{itemize}
+
+\vspace{0.15em}
+\subsection*{Mingling Minds \hfill \href{https://github.com/sakshi-suryawanshi/MinglingMinds}{GitHub}}
+\textit{Personal Project} \textbar{} NextJS, TypeScript, GraphQL, Apollo Server, Prisma, PostgreSQL, AWS
+\begin{itemize}[topsep=2pt]
+  \item Developed a \h{full-stack social media platform} featuring real-time feeds, post creation, and image uploads
+  \item Built a modern, responsive frontend using \h{NextJS and React with TypeScript} for type safety and component reusability
+  \item Implemented complex UI components including \h{infinite scroll, image galleries, and interactive forms}
+  \item Designed \h{GraphQL API with Apollo Server} for efficient data fetching and real-time updates
+  \item Implemented secure authentication using \h{Google OAuth 2.0} and JWT-based API authorisation
+  \item Automated \h{GraphQL query generation using Codegen}; deployed on AWS with production architecture
+  \item Integrated \h{Prisma ORM} for type-safe database access and schema management with PostgreSQL
+\end{itemize}
+
+\vspace{0.4em}
+
+%% ── EDUCATION ────────────────────────────────────────────────────────────────
+\section*{Education}
+\textbf{Bachelor of Engineering (B.E.) in Computer Science} \hfill \textbf{CGPA: 9.54 / 10}\\
+Pimpri Chinchwad College of Engineering, Pune \hfill June 2018 \textendash{} June 2022\\[0.12em]
+\textbf{Honours in Data Science} \hfill June 2020 \textendash{} June 2022\\[0.08em]
+\href{https://drive.google.com/file/d/1pRByI4wXkzrAlU01gC_9LvlRlEBMOAma/view?usp=drive_link}{View Degree Certificate}\\[0.08em]
+\textit{Relevant coursework:} Data Structures and Algorithms, OOP, Database Systems, OS, Computer Networks, ML, Software Engineering
+
+\vspace{0.4em}
+
+%% ── CERTIFICATIONS & ACHIEVEMENTS ────────────────────────────────────────────
+\section*{Certifications \& Achievements}
+\href{https://drive.google.com/drive/u/1/folders/1ocAD7_typvgX5pLDh5-g8toVuhYvwl2a}{View All Certificates}
+\begin{itemize}[topsep=2pt]
+  \item \textbf{Published research:} ``Emotion Recognition Systems Based on Machine Learning Classifiers'' in \textit{21st Century Innovations in Management, Science and Technology, Education, and Social Sciences}; achieved \h{95\% classification accuracy} on \h{8,000+ audio samples} using a multi-layer CNN
+  \item \h{Finalist} at Smart PCMC Hackathon (2020)
+  \item \h{Membership Chairperson} — PCCOE CSI Chapter (2020 \textendash{} 2021)
+  \item Lyft Back-End Engineering Virtual Experience — Forage
+  \item Introduction to Back-End Development — Meta
+  \item Python and SQL Certifications — HackerRank (\h{5-Star Rating in Python})
+\end{itemize}
+
+\vspace{0.4em}
+
+%% ── ADDITIONAL INFORMATION ───────────────────────────────────────────────────
+\section*{Additional Information}
+\begin{itemize}
+  \item Conducted multiple \h{internal knowledge transfer sessions} on full-stack development workflows, React best practices, and production debugging techniques
+  \item Experienced in \h{fully remote, international team environments} across multiple time zones with async-first communication
+  \item Strong \h{communication skills and ownership mentality}; comfortable taking end-to-end responsibility for features and systems
+  \item Passionate about learning new technologies and staying current with modern backend, full-stack, and AI-augmented development practices
+\end{itemize}
+
+\end{document}
