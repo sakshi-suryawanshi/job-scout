@@ -621,16 +621,38 @@ with tab_signals:
         "They indicate companies that may be urgently hiring."
     )
 
+    def _sig_field(sig: dict, key: str) -> str:
+        """Pull a field from a signal row.
+
+        `create_signal_from_result()` writes company_name/snippet/url into the
+        `metadata` JSON column, not the top-level columns. Try top-level first
+        for forward-compat, then fall back to metadata.
+        """
+        val = sig.get(key)
+        if val:
+            return val
+        meta = sig.get("metadata") or {}
+        return meta.get(key) or ""
+
     @st.cache_data(ttl=60, show_spinner=False)
     def _load_signals(limit: int = 200):
-        try:
-            return db._request("GET", "signals", params={
-                "order": "created_at.desc", "limit": limit,
-            }) or []
-        except Exception:
-            return []
+        # No silent except — let the error bubble so we can show it in the UI.
+        rows = db._request("GET", "signals", params={
+            "order": "created_at.desc", "limit": limit,
+        }) or []
+        return rows
 
-    signals = _load_signals()
+    # Refresh + load
+    refresh_col, _ = st.columns([1, 5])
+    if refresh_col.button("🔄 Refresh", key="sig_refresh", use_container_width=True):
+        _load_signals.clear()
+        st.rerun()
+
+    try:
+        signals = _load_signals()
+    except Exception as e:
+        st.error(f"Failed to load signals from DB: {e}")
+        signals = []
 
     if not signals:
         st.info(
@@ -654,22 +676,34 @@ with tab_signals:
         if f_type != "All":
             filtered_sigs = [s for s in filtered_sigs if s.get("signal_type") == f_type]
         if sig_search:
-            filtered_sigs = [s for s in filtered_sigs if sig_search.lower() in (s.get("company_name") or "").lower()]
+            needle = sig_search.lower()
+            filtered_sigs = [s for s in filtered_sigs if needle in _sig_field(s, "company_name").lower()]
 
-        st.write(f"**{len(filtered_sigs)}** signals")
+        # Clear distinction between "DB empty" and "filtered to nothing"
+        if filtered_sigs:
+            st.write(f"**{len(filtered_sigs)}** signals (of {len(signals)} in DB)")
+        else:
+            st.warning(
+                f"0 of **{len(signals)}** signals match your filter — "
+                f"clear the search box{' / change Filter by type' if f_type != 'All' else ''} to see all."
+            )
 
         for sig in filtered_sigs[:100]:
-            company = sig.get("company_name") or sig.get("company") or "Unknown"
+            company  = _sig_field(sig, "company_name") or "Unknown"
             sig_type = sig.get("signal_type", "unknown")
-            snippet = sig.get("snippet") or sig.get("detail") or ""
-            created = str(sig.get("created_at", ""))[:10]
-            url = sig.get("url", "")
+            snippet  = _sig_field(sig, "snippet")
+            created  = str(sig.get("created_at", ""))[:10]
+            url      = _sig_field(sig, "url")
+            src      = sig.get("source_signal", "")
 
-            icon = {"distress": "🆘", "funding": "💰", "hidden_gem": "💎", "regional": "🌍"}.get(
-                sig_type.split("_")[0], "📡"
+            icon = {"distress": "🆘", "funding": "💰", "hidden": "💎",
+                    "hiring": "📢", "github_activity": "🐙", "regional": "🌍"}.get(
+                sig_type, "📡"
             )
             with st.expander(f"{icon} **{company}** — {sig_type} ({created})"):
                 if snippet:
                     st.caption(snippet[:300])
+                if src:
+                    st.caption(f"Source: `{src}`")
                 if url:
-                    st.markdown(f"[🔗 Source]({url})")
+                    st.markdown(f"[🔗 Open]({url})")
