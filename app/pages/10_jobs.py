@@ -54,9 +54,10 @@ def _resume_text():
         return ""
 
 def _score_badge(score):
-    if score >= 80:  return f"🟢 {score}"
-    if score >= 60:  return f"🟡 {score}"
-    if score >= 40:  return f"🟠 {score}"
+    # Aligned with RECOMMEND_THRESHOLD=85 in job_scout/ai/gemini.py
+    if score >= 85:  return f"🟢 {score}"
+    if score >= 70:  return f"🟡 {score}"
+    if score >= 50:  return f"🟠 {score}"
     if score >  0:   return f"🔴 {score}"
     return ""
 

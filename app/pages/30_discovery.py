@@ -66,12 +66,16 @@ def _save_prefs(criteria: dict) -> bool:
 
     prefs_update = {
         "title_keywords": criteria.get("title_keywords", []),
-        "skills": criteria.get("required_skills", []),
+        "must_have_skills": criteria.get("must_have_skills", []),
+        "nice_to_have_skills": criteria.get("nice_to_have_skills", []),
+        # legacy key — keep populated for any older callers
+        "skills": criteria.get("nice_to_have_skills", []),
         "exclude_keywords": criteria.get("exclude_keywords", []),
         "remote_only": criteria.get("remote_only", True),
         "global_remote": criteria.get("global_remote_only", True),
         "max_yoe": criteria.get("max_yoe", 5),
         "min_salary": criteria.get("min_salary"),
+        "score_threshold": criteria.get("score_threshold", 85),
     }
 
     # Primary: save to disk (always works, no schema dependency)
@@ -96,37 +100,58 @@ def _save_prefs(criteria: dict) -> bool:
 
 def _criteria_form(key_prefix: str):
     prefs = _load_prefs()
+    # Migrate legacy `skills` to nice_to_have_skills on first load
+    nice_default = prefs.get("nice_to_have_skills") or prefs.get("skills") or []
+
     c1, c2 = st.columns(2)
     with c1:
         title_kw = st.text_input(
             "Title keywords",
-            value=", ".join(prefs.get("title_keywords", ["backend", "developer", "engineer", "software", "python", "golang"])),
+            value=", ".join(prefs.get("title_keywords", ["backend", "developer", "engineer", "software", "python"])),
             key=f"{key_prefix}_title",
+            help="Whole-word match against the title. E.g. 'engineer' won't match 'engineering manager'.",
         )
-        skills = st.text_input(
-            "Required skills (optional)",
-            value=", ".join(prefs.get("skills", [])),
-            key=f"{key_prefix}_skills",
+        must_have = st.text_input(
+            "Must-have skills (ALL required, gate)",
+            value=", ".join(prefs.get("must_have_skills", [])),
+            key=f"{key_prefix}_must",
+            help="Every skill here MUST appear in the JD or the job is gated (score=0). Keep this small.",
+        )
+        nice = st.text_input(
+            "Nice-to-have skills (overlap, scored)",
+            value=", ".join(nice_default),
+            key=f"{key_prefix}_nice",
+            help="Overlap is rewarded but not required. Populate generously — empty list = 0 skill points.",
         )
         exclude = st.text_input(
             "Exclude from title",
-            value=", ".join(prefs.get("exclude_keywords", ["staff", "principal", "director", "vp", "head of"])),
+            value=", ".join(prefs.get("exclude_keywords", ["staff", "principal", "director", "vp", "head of", "senior", "manager", "intern"])),
             key=f"{key_prefix}_excl",
+            help="Whole-word match. 'lead' won't match 'leadership'.",
         )
     with c2:
         remote = st.checkbox("Remote only", value=prefs.get("remote_only", True), key=f"{key_prefix}_rem")
         global_rem = st.checkbox("Global remote (exclude US-only, India-based)", value=prefs.get("global_remote", True), key=f"{key_prefix}_grem")
         max_yoe = st.slider("Max YOE", 0, 15, prefs.get("max_yoe", 5), key=f"{key_prefix}_yoe")
         min_sal = st.number_input("Min salary (0 = any)", value=prefs.get("min_salary") or 0, step=5000, key=f"{key_prefix}_msal")
+        threshold = st.slider(
+            "Must-apply threshold", 60, 95, prefs.get("score_threshold", 85), step=5,
+            key=f"{key_prefix}_thr",
+            help="Score ≥ this → is_recommended=True (green badge). 85 = strict (~top 1-3%).",
+        )
 
     return {
         "title_keywords": [k.strip() for k in title_kw.split(",") if k.strip()],
-        "required_skills": [k.strip() for k in skills.split(",") if k.strip()],
+        "must_have_skills": [k.strip() for k in must_have.split(",") if k.strip()],
+        "nice_to_have_skills": [k.strip() for k in nice.split(",") if k.strip()],
+        # legacy field kept for any old callers
+        "required_skills": [k.strip() for k in nice.split(",") if k.strip()],
         "exclude_keywords": [k.strip() for k in exclude.split(",") if k.strip()],
         "remote_only": remote,
         "global_remote_only": global_rem,
         "max_yoe": max_yoe,
         "min_salary": min_sal if min_sal > 0 else None,
+        "score_threshold": threshold,
     }
 
 
@@ -302,13 +327,74 @@ with tab_scrape:
                 )
             st.dataframe(rows, use_container_width=True, hide_index=True)
 
-        # Score new jobs
+        # Score new jobs (rule-based always; AI refines top-50 if key present)
         from job_scout.ai.gemini import score_all_jobs
-        if _gemini_key and grand["saved"] > 0:
-            with st.spinner("Scoring new jobs with AI..."):
-                os.environ["GEMINI_API_KEY"] = _gemini_key
-                score_result = score_all_jobs(db=db, criteria=criteria, use_ai=True, max_jobs=300)
-            st.info(f"Scored {score_result['scored']} jobs (avg {score_result['avg_score']}).")
+        if grand["saved"] > 0:
+            with st.spinner("Scoring new jobs (rule-based + AI top-50)…"):
+                if _gemini_key:
+                    os.environ["GEMINI_API_KEY"] = _gemini_key
+                score_result = score_all_jobs(
+                    db=db, criteria=criteria, use_ai=bool(_gemini_key),
+                    max_jobs=1000,
+                )
+            st.info(
+                f"📊 Scored **{score_result['scored']}** jobs · "
+                f"avg **{score_result['avg_score']}** · "
+                f"gated **{score_result.get('gated', 0)}** · "
+                f"AI-refined **{score_result.get('ai_refined', 0)}** · "
+                f"⭐ recommended (≥{criteria.get('score_threshold', 85)}): "
+                f"**{score_result.get('recommended', 0)}**"
+            )
+
+    # ── Re-score existing jobs (criteria changed, etc.) ─────────────────────
+    st.divider()
+    rs_col1, rs_col2 = st.columns([2, 5])
+    with rs_col1:
+        rs_max = st.number_input(
+            "Re-score budget", min_value=100, max_value=5000, value=1000, step=100,
+            key="rs_max", help="Max jobs to re-score in one batch.",
+        )
+    with rs_col2:
+        st.caption(
+            "Re-score **every** job in the DB against the current criteria — use this "
+            "after editing must-have skills / exclusions / YOE. Otherwise old jobs keep "
+            "stale scores forever."
+        )
+    if st.button("🔄 Re-score all jobs", use_container_width=True, key="rescore_btn"):
+        from job_scout.ai.gemini import score_all_jobs
+        _save_prefs(criteria)
+        progress = st.progress(0)
+        status = st.empty()
+        def _rs_cb(msg, p):
+            status.write(msg)
+            progress.progress(min(p, 1.0))
+        if _gemini_key:
+            os.environ["GEMINI_API_KEY"] = _gemini_key
+        result = score_all_jobs(
+            db=db, criteria=criteria, use_ai=bool(_gemini_key),
+            max_jobs=int(rs_max), force_rescore=True, progress_callback=_rs_cb,
+        )
+        progress.progress(1.0)
+        status.write("**Done!**")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Scored",      result["scored"])
+        m2.metric("Avg score",   result["avg_score"])
+        m3.metric("Gated",       result.get("gated", 0))
+        m4.metric("AI-refined",  result.get("ai_refined", 0))
+        m5.metric(
+            f"≥{criteria.get('score_threshold', 85)}",
+            result.get("recommended", 0),
+        )
+        if result.get("recommended", 0) == 0:
+            st.warning(
+                "No jobs scored above the threshold. Try: relax `max_yoe`, remove a "
+                "must-have skill, or lower the threshold slider."
+            )
+        else:
+            st.success(
+                f"⭐ **{result['recommended']}** jobs scored ≥ "
+                f"{criteria.get('score_threshold', 85)}. Open the Jobs page to review them."
+            )
 
 
 # ── Tab 2: Serper Dorking (Daily LinkedIn/Indeed merged in as a preset) ─────

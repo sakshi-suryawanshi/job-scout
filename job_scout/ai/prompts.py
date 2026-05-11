@@ -33,7 +33,15 @@ Return this exact JSON format:
     "signals": {{"title_match": <0-25>, "skills_match": <0-25>, "remote_match": <0-25>, "experience_match": <0-25>}}
 }}
 
-Scoring: 80-100=strong, 60-79=decent, 40-59=partial, 20-39=weak, 0-19=poor.
+CALIBRATION — be strict:
+- 85-100 = "apply today". Globally remote (not US-only, not India). Title is a
+  junior/IC role in the software-engineering family (no senior/staff/lead/principal/manager).
+  YOE requirement within {max_yoe}+1 years. At least 2 required skills are in the JD.
+- 70-84 = decent match with one weakness (unclear remote, one missing skill, edge YOE).
+- 50-69 = partial — wrong seniority OR weak skills overlap OR US-only.
+- 0-49 = clearly off (wrong role family, India-located, 5+ years required, etc).
+
+If in doubt, score lower. The user wants ~20 jobs out of 1000 at 85+, not 200.
 JSON response:"""
 
 BATCH_SCORING_PROMPT = """\
@@ -47,6 +55,13 @@ Candidate:
 
 Jobs:
 {jobs_json}
+
+CALIBRATION — be strict:
+- 85+ ONLY for globally-remote, junior/IC software-engineering roles, YOE within max+1,
+  with clear skill overlap. Anything ambiguous → ≤79.
+- US-only / "must be authorized to work in US" → cap at 60.
+- Senior/Staff/Lead/Principal/Manager in title → cap at 40.
+- India-located → cap at 20.
 
 Return JSON array — one object per job in the same order:
 [{{"id": "<job_id>", "score": <0-100>, "match_reason": "<1 sentence>"}}, ...]
