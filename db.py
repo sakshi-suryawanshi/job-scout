@@ -257,8 +257,11 @@ class Database:
                 # apply_url tiebreaker: if two listings for the same role have DIFFERENT
                 # apply_urls and were posted more than 14 days apart, treat as a re-post
                 # (the role was re-listed) and let it through as a new entry.
-                new_url   = (job.get("apply_url") or "").strip()
-                exist_url = (existing.get("apply_url") or "").strip()
+                # Normalize URLs first (strip query/fragment/trailing slash) so trivial
+                # variants of the same URL don't trigger spurious reposts.
+                from job_scout.enrichment.dedup import _normalize_apply_url
+                new_url   = _normalize_apply_url(job.get("apply_url") or "")
+                exist_url = _normalize_apply_url(existing.get("apply_url") or "")
                 if new_url and exist_url and new_url != exist_url:
                     from datetime import datetime, timedelta
                     _cutoff = datetime.now() - timedelta(days=14)

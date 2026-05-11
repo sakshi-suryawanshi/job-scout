@@ -270,6 +270,49 @@ with st.expander("📊 **Score audit** — verify scoring is happening", expande
             } for j in gated]
             st.dataframe(rows, use_container_width=True, hide_index=True)
 
+with st.expander("🧹 **Dedup audit** — find and collapse duplicate job rows", expanded=False):
+    st.caption(
+        "Duplicates accumulate because `normalize_text` rules have changed over time "
+        "(e.g. seniority stripping was added later) — older rows store stale fingerprints "
+        "that no longer match a fresh insert's fingerprint, so upsert_job misses them."
+    )
+    dd_col1, dd_col2 = st.columns([1, 1])
+    if dd_col1.button("🔍 Dry-run audit (no changes)", use_container_width=True, key="dd_dry"):
+        from job_scout.enrichment.dedup import rebuild_fingerprints
+        with st.spinner("Scanning…"):
+            stats = rebuild_fingerprints(db, dry_run=True)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Scanned",          stats["scanned"])
+        m2.metric("Dupe groups",      stats["groups_with_dupes"])
+        m3.metric("Would delete",     stats["rows_deleted"])
+        m4.metric("FPs to fix",       stats["fingerprints_fixed"])
+        st.info(
+            "Dry-run only — nothing was changed. Click **Apply** to actually "
+            "delete the duplicates and patch fingerprints."
+        )
+    if dd_col2.button("⚡ Apply (delete duplicates + fix fingerprints)", use_container_width=True, key="dd_apply", type="primary"):
+        from job_scout.enrichment.dedup import rebuild_fingerprints
+        progress = st.progress(0)
+        status = st.empty()
+        def _dd_cb(msg, p):
+            status.write(msg)
+            progress.progress(min(p, 1.0))
+        with st.spinner("Rebuilding fingerprints + collapsing duplicates…"):
+            stats = rebuild_fingerprints(db, dry_run=False, progress_callback=_dd_cb)
+        progress.progress(1.0)
+        status.write("**Done!**")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Scanned",      stats["scanned"])
+        m2.metric("Dupe groups",  stats["groups_with_dupes"])
+        m3.metric("Deleted",      stats["rows_deleted"])
+        m4.metric("FPs fixed",    stats["fingerprints_fixed"])
+        st.success(
+            f"Removed **{stats['rows_deleted']}** duplicate rows and rebuilt "
+            f"**{stats['fingerprints_fixed']}** stale fingerprints. "
+            "Future upserts will dedup correctly."
+        )
+        _load_score_audit.clear()
+
 st.divider()
 
 tab_queue, tab_all, tab_saved, tab_applied, tab_followups, tab_attention = st.tabs([
