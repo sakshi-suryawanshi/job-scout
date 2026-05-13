@@ -306,11 +306,9 @@ def _record_application(db, job: Dict, result: ApplyResult, resume_text: str):
         print(f"_record_application error for {job_id}: {e}")
 
 
-# Hard per-job wall-clock for Stage 6. A single hung Playwright (Cloudflare
-# challenge, infinite-redirect site, hung file picker, etc.) used to block
-# the whole pipeline and prevent the digest from sending. With this in
-# place the worker drops the job after `_PER_JOB_TIMEOUT` and moves on.
-_PER_JOB_TIMEOUT = int(os.getenv("AUTO_APPLY_JOB_TIMEOUT", "120"))
+# Max jobs from the same company in a single batch — prevents one company's
+# career page flooding the pipeline (e.g. SpaceX 6 Starlink roles).
+_MAX_PER_COMPANY = int(os.getenv("AUTO_APPLY_MAX_PER_COMPANY", "2"))
 
 
 def run_auto_apply_batch(
@@ -321,20 +319,20 @@ def run_auto_apply_batch(
     headless: bool = True,
 ) -> Dict:
     """
-    Apply to a batch of jobs using the rules engine + orchestrator.
+    Prepare applications for a batch of jobs: generate cover letter, mark
+    needs_attention, store in applications table. NO Playwright — the user
+    triggers the actual form-fill from the UI when they're ready.
 
-    Stops at daily_cap to prevent over-applying.
-    Each job is hard-capped at `_PER_JOB_TIMEOUT` seconds so a hang on one
-    job can't block the rest of the run (or Stage 8 digest).
+    Stops at daily_cap. Max `_MAX_PER_COMPANY` jobs per company.
     Returns stats dict.
     """
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+    from collections import Counter
 
-    stats = {"evaluated": 0, "applied": 0, "needs_attention": 0, "failed": 0, "skipped": 0, "timed_out": 0}
+    stats = {"evaluated": 0, "prepared": 0, "needs_attention": 0, "skipped": 0}
     profile = load_applicant_profile()
 
     if not profile.get("email"):
-        print("run_auto_apply_batch: APPLY_EMAIL not set — skipping all applications")
+        print("run_auto_apply_batch: APPLY_EMAIL not set — skipping")
         stats["skipped"] = len(jobs)
         return stats
 
@@ -342,28 +340,32 @@ def run_auto_apply_batch(
 
     rules = load_rules(db)
     if not rules:
-        # Fall back to a sensible built-in rule so Stage 6 still runs when the
-        # user hasn't configured any rules yet. Matches: score ≥ 80, ATS in
-        # tier-1 (greenhouse/lever/ashby). Remote filter is intentionally
-        # omitted because is_remote_global is unreliable from board feeds.
-        print("run_auto_apply_batch: no DB rules — using built-in default rule (score≥80, tier-1 ATS)")
+        print("run_auto_apply_batch: no DB rules — using built-in default (score≥80)")
         rules = [{
             "name": "_builtin_default",
             "is_active": True,
             "priority": 0,
             "conditions": {"all_of": [
                 {"field": "match_score", "op": ">=", "value": 80},
-                {"field": "ats_type",    "op": "in", "value": ["greenhouse", "lever", "ashby"]},
             ]},
             "action": {"type": "auto_apply", "tier": 1},
         }]
 
+    company_counts: Counter = Counter()
+
     for job in jobs:
-        if stats["applied"] >= daily_cap:
+        if stats["prepared"] >= daily_cap:
             stats["skipped"] += len(jobs) - stats["evaluated"]
             break
 
         stats["evaluated"] += 1
+
+        # Per-company cap
+        co_name = ((job.get("companies") or {}).get("name") or "").lower()
+        if co_name and company_counts[co_name] >= _MAX_PER_COMPANY:
+            stats["skipped"] += 1
+            continue
+
         matching_rule = find_matching_rule(job, rules)
         if not matching_rule:
             stats["skipped"] += 1
@@ -374,29 +376,33 @@ def run_auto_apply_batch(
             stats["skipped"] += 1
             continue
 
-        # Run apply_to_job inside a worker thread so we can enforce a
-        # hard wall-clock timeout. If the call exceeds _PER_JOB_TIMEOUT we
-        # log + continue; the leaked Playwright browser inside the worker
-        # will be cleaned up when the process exits.
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(apply_to_job, job, resume_text, headless, profile, db)
-            try:
-                result = future.result(timeout=_PER_JOB_TIMEOUT)
-                if result.status == "applied":
-                    stats["applied"] += 1
-                    print(f"  ✅ Applied: {job.get('title')} ({result.tier=})")
-                elif result.status == "needs_attention":
-                    stats["needs_attention"] += 1
-                    print(f"  ⚠️  Needs attention: {job.get('title')} — {result.notes}")
-                else:
-                    stats["failed"] += 1
-                    print(f"  ❌ Failed: {job.get('title')} — {result.error}")
-            except FutureTimeout:
-                stats["timed_out"] += 1
-                stats["failed"] += 1
-                print(f"  ⏱️  Timeout ({_PER_JOB_TIMEOUT}s) — moving on: {job.get('title')} [{job.get('apply_url','')[:60]}]")
-            except Exception as e:
-                stats["failed"] += 1
-                print(f"  ❌ Exception applying to {job.get('title')}: {e}")
+        # Prepare the application: cover letter + record — no Playwright.
+        try:
+            cover_letter = _generate_cover_letter(job, resume_text)
+            result = ApplyResult(
+                status="needs_attention", tier=0,
+                apply_url=job.get("apply_url", ""),
+                cover_letter=cover_letter,
+                notes="Prepared — open Prefill & Apply in the Jobs page to fill the form.",
+            )
+            _record_application(db, job, result, resume_text)
+            stats["needs_attention"] += 1
+            stats["prepared"] += 1
+            if co_name:
+                company_counts[co_name] += 1
+            print(f"  📋 Prepared: {job.get('title')} — {co_name or 'unknown'}")
+        except Exception as e:
+            stats["skipped"] += 1
+            print(f"  ❌ Prepare error: {job.get('title')} — {e}")
 
     return stats
+
+
+def prefill_and_open(job: Dict, resume_text: str, db=None) -> ApplyResult:
+    """Open a VISIBLE Playwright browser, prefill the application form, and
+    leave the window open for the user to review and submit.
+
+    Called from the UI (Jobs page "Prefill & Open" button), NOT from the
+    scheduled pipeline.
+    """
+    return apply_to_job(job, resume_text, headless=False, db=db)

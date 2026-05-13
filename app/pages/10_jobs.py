@@ -585,9 +585,28 @@ with tab_attention:
                 with left:
                     if job.get("apply_url"):
                         st.markdown(f"[🔗 Open Application Page]({job['apply_url']})")
-                    st.caption("Pre-filled values to copy-paste into the form:")
 
-                    # Show pre-filled values from applications table if available
+                    # Prefill & Open: launches a visible Playwright browser with the
+                    # form pre-filled — user reviews and clicks Submit themselves.
+                    if job.get("apply_url") and st.button(
+                        "🚀 Prefill & Open in Browser", key=f"pf_{job['id']}",
+                        use_container_width=True, type="primary",
+                    ):
+                        resume = _resume_text()
+                        if not resume:
+                            st.warning("Upload your resume first (Profile → Resume).")
+                        else:
+                            with st.spinner("Opening browser and prefilling form…"):
+                                try:
+                                    from job_scout.application.orchestrator import prefill_and_open
+                                    result = prefill_and_open(job, resume, db=db)
+                                    if result.screenshot_path:
+                                        st.image(result.screenshot_path, caption="Prefilled form")
+                                    st.info(result.notes or "Form opened — switch to the browser window to review and submit.")
+                                except Exception as e:
+                                    st.error(f"Prefill error: {e}")
+
+                    # Show cover letter from applications table if available
                     try:
                         app_record = db._request("GET", "applications", params={
                             "job_id": f"eq.{job['id']}", "limit": 1
@@ -603,7 +622,7 @@ with tab_attention:
                 with right:
                     jid = job.get("id")
                     if jid:
-                        if st.button("✅ Mark Applied", key=f"ma_{jid}", use_container_width=True, type="primary"):
+                        if st.button("✅ Mark Applied", key=f"ma_{jid}", use_container_width=True):
                             db.mark_job_applied(jid); st.rerun()
                         if st.button("❌ Skip", key=f"sa_{jid}", use_container_width=True):
                             db.mark_job_action(jid, "rejected"); st.rerun()
