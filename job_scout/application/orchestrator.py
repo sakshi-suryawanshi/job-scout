@@ -29,6 +29,32 @@ _TIER1_URL_HOSTS = {
 }
 
 
+_PREFILLABLE_HOSTS = {
+    "boards.greenhouse.io", "job-boards.greenhouse.io",
+    "boards.eu.greenhouse.io", "job-boards.eu.greenhouse.io",
+    "jobs.ashbyhq.com",
+    "jobs.lever.co",
+}
+
+
+def _is_prefillable_url(apply_url: str) -> bool:
+    """Return True if this URL hosts an actual application form.
+
+    HN threads, LinkedIn listings, Reddit posts, board aggregator pages,
+    and Cloudflare-walled sites don't have fillable forms.
+    """
+    from urllib.parse import urlparse, parse_qs
+    if not apply_url:
+        return False
+    parsed = urlparse(apply_url)
+    host = parsed.netloc.lower()
+    if host in _PREFILLABLE_HOSTS:
+        return True
+    if parse_qs(parsed.query).get("gh_jid"):
+        return True
+    return False
+
+
 def _is_tier1_apply_url(ats_type: str, apply_url: str) -> bool:
     hosts = _TIER1_URL_HOSTS.get(ats_type, ())
     return any(h in (apply_url or "").lower() for h in hosts)
@@ -85,6 +111,13 @@ def apply_to_job(
     apply_url = job.get("apply_url", "")
     if not apply_url:
         return ApplyResult(status="skipped", tier=0, apply_url="", notes="No apply URL")
+
+    # Skip Playwright entirely for URLs that don't host application forms.
+    if not _is_prefillable_url(apply_url):
+        return ApplyResult(
+            status="needs_attention", tier=0, apply_url=apply_url,
+            notes="Not a direct application form — apply manually via the link.",
+        )
 
     company_info = job.get("companies", {}) or {}
     ats_type = (company_info.get("ats_type") or job.get("ats_type") or "unknown").lower()

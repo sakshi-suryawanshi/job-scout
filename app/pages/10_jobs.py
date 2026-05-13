@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs
 
 st.set_page_config(page_title="Jobs — Job Scout", page_icon="💼", layout="wide")
 
@@ -10,6 +11,28 @@ try:
 except Exception as e:
     st.error(f"Database error: {e}")
     st.stop()
+
+_PREFILLABLE_HOSTS = {
+    "boards.greenhouse.io", "job-boards.greenhouse.io",
+    "boards.eu.greenhouse.io", "job-boards.eu.greenhouse.io",
+    "jobs.ashbyhq.com",
+    "jobs.lever.co",
+}
+
+def _is_prefillable_url(url: str) -> bool:
+    """Return True if this apply_url points at a real application form that
+    Playwright can fill. Board listings (HN, LinkedIn, RemoteOK, WWR) and
+    discussion pages don't have forms — show just the link for those."""
+    if not url:
+        return False
+    host = urlparse(url).netloc.lower()
+    if host in _PREFILLABLE_HOSTS:
+        return True
+    # Company careers pages with ?gh_jid= embed Greenhouse — rewritable
+    if parse_qs(urlparse(url).query).get("gh_jid"):
+        return True
+    return False
+
 
 def _gemini_key():
     key = os.getenv("GEMINI_API_KEY", "")
@@ -586,9 +609,10 @@ with tab_attention:
                     if job.get("apply_url"):
                         st.markdown(f"[🔗 Open Application Page]({job['apply_url']})")
 
-                    # Prefill & Open: launches a visible Playwright browser with the
-                    # form pre-filled — user reviews and clicks Submit themselves.
-                    if job.get("apply_url") and st.button(
+                    # Prefill & Open: only for URLs with real application forms.
+                    # HN, LinkedIn, Reddit, board listings don't have forms.
+                    _can_prefill = _is_prefillable_url(job.get("apply_url", ""))
+                    if _can_prefill and st.button(
                         "🚀 Prefill & Open in Browser", key=f"pf_{job['id']}",
                         use_container_width=True, type="primary",
                     ):
