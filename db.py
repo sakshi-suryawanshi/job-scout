@@ -329,9 +329,16 @@ class Database:
         params["order"] = "discovered_at.desc"
         
         try:
-            # Join with companies for name
-            select = "*,companies(name,website)"
-            return self._request("GET", "jobs", params={**params, "select": select}) or []
+            # Join with companies — include ats_type so the rules engine and
+            # auto-apply orchestrator can route to the right Playwright filler.
+            select = "*,companies(name,website,ats_type)"
+            rows = self._request("GET", "jobs", params={**params, "select": select}) or []
+            # Flatten companies.ats_type onto the job for code that reads job["ats_type"].
+            for r in rows:
+                co = r.get("companies") or {}
+                if isinstance(co, dict) and co.get("ats_type") and not r.get("ats_type"):
+                    r["ats_type"] = co["ats_type"]
+            return rows
         except Exception as e:
             print(f"Error getting jobs: {e}")
             return []
@@ -372,7 +379,7 @@ class Database:
                 "user_action": "in.(null,saved)",
                 "order": "match_score.desc",
                 "limit": limit,
-                "select": "*,companies(name,website)",
+                "select": "*,companies(name,website,ats_type)",
             }) or []
         except Exception as e:
             print(f"Error getting apply queue: {e}")
@@ -386,7 +393,7 @@ class Database:
                 "user_action": "eq.applied",
                 "follow_up_date": f"lte.{cutoff}",
                 "order": "follow_up_date.asc",
-                "select": "*,companies(name,website)",
+                "select": "*,companies(name,website,ats_type)",
             }) or []
         except Exception as e:
             print(f"Error getting follow-ups: {e}")

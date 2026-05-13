@@ -19,6 +19,44 @@ _TIER1_ATS = {"greenhouse", "lever", "ashby"}
 # Source boards that get email outreach (Tier 3)
 _TIER3_SOURCES = {"hackernews", "hackernews_jobs", "reddit_forhire", "reddit_remotejs"}
 
+# apply_url must contain the ATS's own domain — otherwise the URL is a
+# board-listing page (RemoteOK, Wellfound, etc.) and the Tier-1 form-filler
+# will never find the right inputs. Route those to Tier-2 instead.
+_TIER1_URL_HOSTS = {
+    "greenhouse": ("boards.greenhouse.io", "job-boards.greenhouse.io", "greenhouse.io"),
+    "lever":      ("jobs.lever.co", "lever.co"),
+    "ashby":      ("jobs.ashbyhq.com", "ashbyhq.com"),
+}
+
+
+def _is_tier1_apply_url(ats_type: str, apply_url: str) -> bool:
+    hosts = _TIER1_URL_HOSTS.get(ats_type, ())
+    return any(h in (apply_url or "").lower() for h in hosts)
+
+
+def _rewrite_greenhouse_jid(apply_url: str) -> str:
+    """If `apply_url` carries a `gh_jid=NNN` query param, rewrite to the
+    canonical Greenhouse boards URL. Many company careers pages (Samsara,
+    Nebius, SoFi…) embed Greenhouse and use this param — the canonical URL
+    serves the same form without the wrapper SPA.
+
+    We can't infer the company slug from the param alone, but Greenhouse's
+    boards URL `https://boards.greenhouse.io/embed/job_app?for={slug}&token={jid}`
+    isn't universal either. The reliable canonical form for an isolated job
+    is `https://boards.greenhouse.io/embed/job_app?token={jid}` which serves
+    the same fields. Returns "" if no gh_jid param is present.
+    """
+    from urllib.parse import urlparse, parse_qs
+    try:
+        u = urlparse(apply_url or "")
+        params = parse_qs(u.query)
+        jid = (params.get("gh_jid") or [None])[0]
+        if not jid:
+            return ""
+        return f"https://boards.greenhouse.io/embed/job_app?token={jid}"
+    except Exception:
+        return ""
+
 
 def apply_to_job(
     job: Dict,
@@ -92,28 +130,37 @@ def apply_to_job(
         _record_application(db, job, result, resume_text)
         return result
 
-    # ── Tier 1: Full automation ────────────────────────────────────────────
-    if ats_type == "greenhouse":
-        from job_scout.application.greenhouse_form import apply_greenhouse
-        result = apply_greenhouse(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
+    # Many company careers pages embed Greenhouse via a `?gh_jid=XXX` param.
+    # Rewriting those to the canonical boards.greenhouse.io URL lets the
+    # Tier-1 filler handle them instead of relying on the SPA to render.
+    rewritten = _rewrite_greenhouse_jid(apply_url)
+    if rewritten and rewritten != apply_url:
+        apply_url = rewritten
+        if ats_type not in _TIER1_ATS:
+            ats_type = "greenhouse"
+
+    # ── Tier 1: ATS-specific Playwright prefill ────────────────────────────
+    # Use the ATS-specific filler only when apply_url points at the ATS's own
+    # host (otherwise the apply_url is a board listing and ATS selectors miss).
+    if ats_type in _TIER1_ATS and _is_tier1_apply_url(ats_type, apply_url):
+        if ats_type == "greenhouse":
+            from job_scout.application.greenhouse_form import apply_greenhouse
+            result = apply_greenhouse(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
+        elif ats_type == "lever":
+            from job_scout.application.lever_form import apply_lever
+            result = apply_lever(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
+        else:  # ashby
+            from job_scout.application.ashby_form import apply_ashby
+            result = apply_ashby(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
         _record_application(db, job, result, tailored_resume)
         return result
 
-    if ats_type == "lever":
-        from job_scout.application.lever_form import apply_lever
-        result = apply_lever(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
-        _record_application(db, job, result, tailored_resume)
-        return result
-
-    if ats_type == "ashby":
-        from job_scout.application.ashby_form import apply_ashby
-        result = apply_ashby(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
-        _record_application(db, job, result, tailored_resume)
-        return result
-
-    # ── Tier 2: Semi-automation (everything else) ──────────────────────────
-    from job_scout.application.manual import prepare_manual_apply
-    result = prepare_manual_apply(job, tailored_resume if score >= 80 else resume_text, profile)
+    # ── Generic Playwright prefill (any other apply_url) ───────────────────
+    # Workday / SmartRecruiters / board redirects / company custom forms all
+    # land here. Best-effort: fill standard fields, common questions, ask
+    # Gemini for unknowns, screenshot, return needs_attention.
+    from job_scout.application.generic_form import apply_generic
+    result = apply_generic(apply_url, tailored_resume, cover_letter, headless, profile, use_pdf=use_pdf)
     _record_application(db, job, result, tailored_resume)
     return result
 
@@ -259,6 +306,13 @@ def _record_application(db, job: Dict, result: ApplyResult, resume_text: str):
         print(f"_record_application error for {job_id}: {e}")
 
 
+# Hard per-job wall-clock for Stage 6. A single hung Playwright (Cloudflare
+# challenge, infinite-redirect site, hung file picker, etc.) used to block
+# the whole pipeline and prevent the digest from sending. With this in
+# place the worker drops the job after `_PER_JOB_TIMEOUT` and moves on.
+_PER_JOB_TIMEOUT = int(os.getenv("AUTO_APPLY_JOB_TIMEOUT", "120"))
+
+
 def run_auto_apply_batch(
     db,
     jobs: list,
@@ -270,9 +324,13 @@ def run_auto_apply_batch(
     Apply to a batch of jobs using the rules engine + orchestrator.
 
     Stops at daily_cap to prevent over-applying.
+    Each job is hard-capped at `_PER_JOB_TIMEOUT` seconds so a hang on one
+    job can't block the rest of the run (or Stage 8 digest).
     Returns stats dict.
     """
-    stats = {"evaluated": 0, "applied": 0, "needs_attention": 0, "failed": 0, "skipped": 0}
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+    stats = {"evaluated": 0, "applied": 0, "needs_attention": 0, "failed": 0, "skipped": 0, "timed_out": 0}
     profile = load_applicant_profile()
 
     if not profile.get("email"):
@@ -284,9 +342,21 @@ def run_auto_apply_batch(
 
     rules = load_rules(db)
     if not rules:
-        print("run_auto_apply_batch: no active rules — nothing to auto-apply")
-        stats["skipped"] = len(jobs)
-        return stats
+        # Fall back to a sensible built-in rule so Stage 6 still runs when the
+        # user hasn't configured any rules yet. Matches: score ≥ 80, ATS in
+        # tier-1 (greenhouse/lever/ashby). Remote filter is intentionally
+        # omitted because is_remote_global is unreliable from board feeds.
+        print("run_auto_apply_batch: no DB rules — using built-in default rule (score≥80, tier-1 ATS)")
+        rules = [{
+            "name": "_builtin_default",
+            "is_active": True,
+            "priority": 0,
+            "conditions": {"all_of": [
+                {"field": "match_score", "op": ">=", "value": 80},
+                {"field": "ats_type",    "op": "in", "value": ["greenhouse", "lever", "ashby"]},
+            ]},
+            "action": {"type": "auto_apply", "tier": 1},
+        }]
 
     for job in jobs:
         if stats["applied"] >= daily_cap:
@@ -304,19 +374,29 @@ def run_auto_apply_batch(
             stats["skipped"] += 1
             continue
 
-        try:
-            result = apply_to_job(job, resume_text, headless=headless, profile=profile, db=db)
-            if result.status == "applied":
-                stats["applied"] += 1
-                print(f"  ✅ Applied: {job.get('title')} ({result.tier=})")
-            elif result.status == "needs_attention":
-                stats["needs_attention"] += 1
-                print(f"  ⚠️  Needs attention: {job.get('title')} — {result.notes}")
-            else:
+        # Run apply_to_job inside a worker thread so we can enforce a
+        # hard wall-clock timeout. If the call exceeds _PER_JOB_TIMEOUT we
+        # log + continue; the leaked Playwright browser inside the worker
+        # will be cleaned up when the process exits.
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(apply_to_job, job, resume_text, headless, profile, db)
+            try:
+                result = future.result(timeout=_PER_JOB_TIMEOUT)
+                if result.status == "applied":
+                    stats["applied"] += 1
+                    print(f"  ✅ Applied: {job.get('title')} ({result.tier=})")
+                elif result.status == "needs_attention":
+                    stats["needs_attention"] += 1
+                    print(f"  ⚠️  Needs attention: {job.get('title')} — {result.notes}")
+                else:
+                    stats["failed"] += 1
+                    print(f"  ❌ Failed: {job.get('title')} — {result.error}")
+            except FutureTimeout:
+                stats["timed_out"] += 1
                 stats["failed"] += 1
-                print(f"  ❌ Failed: {job.get('title')} — {result.error}")
-        except Exception as e:
-            stats["failed"] += 1
-            print(f"  ❌ Exception applying to {job.get('title')}: {e}")
+                print(f"  ⏱️  Timeout ({_PER_JOB_TIMEOUT}s) — moving on: {job.get('title')} [{job.get('apply_url','')[:60]}]")
+            except Exception as e:
+                stats["failed"] += 1
+                print(f"  ❌ Exception applying to {job.get('title')}: {e}")
 
     return stats

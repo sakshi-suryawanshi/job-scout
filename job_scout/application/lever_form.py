@@ -1,6 +1,6 @@
 # job_scout/application/lever_form.py
 """
-Playwright auto-fill for Lever job application forms.
+Playwright prefill for Lever job application forms.
 Apply URL pattern: https://jobs.lever.co/{slug}/{job_id}/apply
 """
 
@@ -9,7 +9,14 @@ import time
 from datetime import datetime
 from typing import Dict, Optional
 
-from job_scout.application.base import ApplyResult, load_applicant_profile, write_resume_tempfile, screenshots_dir
+from job_scout.application.base import (
+    ApplyResult, load_applicant_profile, write_resume_tempfile, screenshots_dir,
+)
+from job_scout.application._form_helpers import (
+    fill_common_questions, fill_other_email_inputs,
+    tick_required_consent_checkboxes,
+    compute_prefill_coverage, answer_unknowns_with_gemini, build_prefill_notes,
+)
 
 
 def apply_lever(
@@ -20,66 +27,64 @@ def apply_lever(
     profile: Optional[Dict] = None,
     use_pdf: bool = False,
 ) -> ApplyResult:
-    """Auto-fill and submit a Lever application form."""
+    """Prefill a Lever application form. Never submits."""
     try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+        from playwright.sync_api import sync_playwright
     except ImportError:
-        return ApplyResult(
-            status="failed", tier=1, apply_url=apply_url,
-            error="playwright not installed. Run: pip install playwright && playwright install chromium",
-        )
-
+        return ApplyResult(status="failed", tier=1, apply_url=apply_url,
+                           error="playwright not installed")
     if profile is None:
         profile = load_applicant_profile()
-
     if not profile.get("email"):
-        return ApplyResult(status="failed", tier=1, apply_url=apply_url, error="APPLY_EMAIL not set")
+        return ApplyResult(status="failed", tier=1, apply_url=apply_url,
+                           error="APPLY_EMAIL not set")
 
-    # Lever apply URLs end in /apply — add it if missing
     url = apply_url if apply_url.endswith("/apply") else apply_url.rstrip("/") + "/apply"
-
     resume_path = write_resume_tempfile(resume_text, use_pdf=use_pdf)
     screenshot_path = ""
 
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=headless)
-            context = browser.new_context(
+            ctx = browser.new_context(
                 viewport={"width": 1280, "height": 900},
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             )
-            page = context.new_page()
+            page = ctx.new_page()
             page.set_default_timeout(30_000)
-
             page.goto(url, wait_until="domcontentloaded")
             time.sleep(1)
 
-            # ── Fill standard fields ────────────────────────────────────────
-            # Lever uses input#name (full name), input#email, input#phone
-            _fill(page, "#name",  profile["full_name"])
-            _fill(page, "#email", profile["email"])
-            _fill(page, "#phone", profile["phone"])
+            # ── Standard fields ─────────────────────────────────────────────
+            # Lever uses <label>Full name</label> not always #name.
+            # Try label first (works on modern Lever boards), then id selectors.
+            if not _fill_by_label(page, ["Full name", "Full Name", "Name"], profile["full_name"]):
+                _fill(page, "#name, input[name='name']", profile["full_name"])
+            if not _fill_by_label(page, ["Email", "Email address"], profile["email"]):
+                _fill(page, "#email, input[name='email']", profile["email"])
+            if not _fill_by_label(page, ["Phone", "Phone number"], profile["phone"]):
+                _fill(page, "#phone, input[name='phone']", profile["phone"])
+            _fill_by_label(page, ["Current location", "Location"], profile.get("location", ""))
+            fill_other_email_inputs(page, profile["email"])
 
             if profile.get("linkedin_url"):
+                _fill(page, "input[name='urls[LinkedIn]'], #urls-linkedin", profile["linkedin_url"])
                 _fill_by_label(page, ["LinkedIn", "LinkedIn URL"], profile["linkedin_url"])
-                _fill(page, "#urls-linkedin, input[name='urls[LinkedIn]']", profile["linkedin_url"])
-
             if profile.get("github_url"):
+                _fill(page, "input[name='urls[GitHub]'], #urls-github", profile["github_url"])
                 _fill_by_label(page, ["GitHub", "GitHub URL"], profile["github_url"])
-                _fill(page, "#urls-github, input[name='urls[GitHub]']", profile["github_url"])
-
             if profile.get("portfolio_url"):
                 _fill_by_label(page, ["Portfolio", "Website", "Personal Site"], profile["portfolio_url"])
 
             # ── Resume upload ───────────────────────────────────────────────
-            file_input = page.locator("input[type='file']")
-            if file_input.count() > 0:
-                file_input.first.set_input_files(resume_path)
+            file_inputs = page.locator("input[type='file']")
+            if file_inputs.count() > 0:
+                file_inputs.first.set_input_files(resume_path)
                 time.sleep(0.5)
 
             # ── Cover letter / comments ─────────────────────────────────────
             if cover_letter:
-                for sel in ["textarea#comments", "textarea[name='comments']", "textarea[id*='comment']"]:
+                for sel in ("textarea#comments", "textarea[name='comments']", "textarea[id*='comment']"):
                     try:
                         el = page.locator(sel)
                         if el.count() > 0:
@@ -88,50 +93,21 @@ def apply_lever(
                     except Exception:
                         continue
 
-            # ── Screenshot before submit ────────────────────────────────────
+            # ── Common Y/N questions + Gemini fallback ──────────────────────
+            fill_common_questions(page, profile)
+            tick_required_consent_checkboxes(page)
+            ai_notes = answer_unknowns_with_gemini(page, resume_text=resume_text, profile=profile)
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            screenshot_path = os.path.join(screenshots_dir(), f"lever_{ts}_before.png")
-            page.screenshot(path=screenshot_path, full_page=False)
+            screenshot_path = os.path.join(screenshots_dir(), f"lever_{ts}_prefill.png")
+            page.screenshot(path=screenshot_path, full_page=True)
+            coverage = compute_prefill_coverage(page)
 
-            # ── Submit ──────────────────────────────────────────────────────
-            submit = page.locator("button[type='submit']:has-text('Submit'), button:has-text('Submit application')")
-            if submit.count() == 0:
-                submit = page.locator("button[type='submit']")
-            if submit.count() == 0:
-                return ApplyResult(
-                    status="needs_attention", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path,
-                    notes="Submit button not found",
-                )
-
-            submit.first.click()
-
-            # ── Confirm ─────────────────────────────────────────────────────
-            try:
-                page.locator("text=Thank you").or_(
-                    page.locator("text=submitted")
-                ).or_(
-                    page.locator("text=received")
-                ).wait_for(timeout=10_000)
-                ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshots_dir(), f"lever_{ts2}_success.png")
-                page.screenshot(path=screenshot_path, full_page=False)
-                return ApplyResult(
-                    status="applied", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path, cover_letter=cover_letter,
-                )
-            except PWTimeout:
-                ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshots_dir(), f"lever_{ts2}_unclear.png")
-                page.screenshot(path=screenshot_path, full_page=False)
-                return ApplyResult(
-                    status="applied", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path, cover_letter=cover_letter,
-                    notes="Submitted — success confirmation not detected",
-                )
-
-            browser.close()
-
+            return ApplyResult(
+                status="needs_attention", tier=1, apply_url=apply_url,
+                screenshot_path=screenshot_path, cover_letter=cover_letter,
+                notes=build_prefill_notes(coverage, ai_notes),
+            )
     except Exception as e:
         return ApplyResult(status="failed", tier=1, apply_url=apply_url,
                            screenshot_path=screenshot_path, error=str(e))
@@ -155,14 +131,16 @@ def _fill(page, selector: str, value: str):
             continue
 
 
-def _fill_by_label(page, labels, value: str):
+def _fill_by_label(page, labels, value: str) -> bool:
+    """Fill the first matching label-associated input. Returns True if filled."""
     if not value:
-        return
+        return False
     for label in labels:
         try:
             el = page.get_by_label(label, exact=False)
             if el.count() > 0:
                 el.first.fill(value)
-                return
+                return True
         except Exception:
             continue
+    return False

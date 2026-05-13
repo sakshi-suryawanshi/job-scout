@@ -1,8 +1,8 @@
 # job_scout/application/ashby_form.py
 """
-Playwright auto-fill for Ashby job application forms.
+Playwright prefill for Ashby job application forms.
 Apply URL pattern: https://jobs.ashbyhq.com/{slug}/{job_id}
-Ashby uses a React SPA — fields load dynamically.
+Ashby is a React SPA — fields hydrate after navigation.
 """
 
 import os
@@ -10,7 +10,14 @@ import time
 from datetime import datetime
 from typing import Dict, Optional
 
-from job_scout.application.base import ApplyResult, load_applicant_profile, write_resume_tempfile, screenshots_dir
+from job_scout.application.base import (
+    ApplyResult, load_applicant_profile, write_resume_tempfile, screenshots_dir,
+)
+from job_scout.application._form_helpers import (
+    fill_common_questions, fill_other_email_inputs,
+    tick_required_consent_checkboxes,
+    compute_prefill_coverage, answer_unknowns_with_gemini, build_prefill_notes,
+)
 
 
 def apply_ashby(
@@ -21,20 +28,17 @@ def apply_ashby(
     profile: Optional[Dict] = None,
     use_pdf: bool = False,
 ) -> ApplyResult:
-    """Auto-fill and submit an Ashby application form."""
+    """Prefill an Ashby application form. Never submits."""
     try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+        from playwright.sync_api import sync_playwright
     except ImportError:
-        return ApplyResult(
-            status="failed", tier=1, apply_url=apply_url,
-            error="playwright not installed. Run: pip install playwright && playwright install chromium",
-        )
-
+        return ApplyResult(status="failed", tier=1, apply_url=apply_url,
+                           error="playwright not installed")
     if profile is None:
         profile = load_applicant_profile()
-
     if not profile.get("email"):
-        return ApplyResult(status="failed", tier=1, apply_url=apply_url, error="APPLY_EMAIL not set")
+        return ApplyResult(status="failed", tier=1, apply_url=apply_url,
+                           error="APPLY_EMAIL not set")
 
     resume_path = write_resume_tempfile(resume_text, use_pdf=use_pdf)
     screenshot_path = ""
@@ -42,40 +46,41 @@ def apply_ashby(
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=headless)
-            context = browser.new_context(
+            ctx = browser.new_context(
                 viewport={"width": 1280, "height": 900},
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             )
-            page = context.new_page()
+            page = ctx.new_page()
             page.set_default_timeout(30_000)
-
             page.goto(apply_url, wait_until="networkidle")
-            time.sleep(2)  # Ashby SPA needs extra time to hydrate
+            time.sleep(2)  # Ashby needs extra hydration time
 
-            # ── Click "Apply" if on job description page ────────────────────
+            # Click "Apply" if on job description page
             try:
-                apply_btn = page.locator("button:has-text('Apply'), a:has-text('Apply')")
-                if apply_btn.count() > 0:
-                    apply_btn.first.click()
+                btn = page.locator("button:has-text('Apply'), a:has-text('Apply')")
+                if btn.count() > 0:
+                    btn.first.click()
                     page.wait_for_load_state("networkidle")
                     time.sleep(1.5)
             except Exception:
                 pass
 
-            # ── Fill fields by label (Ashby uses consistent aria-labels) ───
-            _fill_labeled(page, "First Name", profile["first_name"])
+            # ── Standard fields by aria-label (Ashby pattern) ───────────────
+            # Some Ashby boards use First/Last, others a single Name field.
+            # Try both; whichever matches wins.
+            if not _fill_labeled(page, "First Name", profile["first_name"]):
+                _fill_labeled(page, "Name", profile["full_name"])
             _fill_labeled(page, "Last Name",  profile["last_name"])
             _fill_labeled(page, "Email",      profile["email"])
             _fill_labeled(page, "Phone",      profile["phone"])
+            fill_other_email_inputs(page, profile["email"])
 
             if profile.get("linkedin_url"):
                 _fill_labeled(page, "LinkedIn", profile["linkedin_url"])
-
             if profile.get("github_url"):
                 _fill_labeled(page, "GitHub", profile["github_url"])
-
             if profile.get("portfolio_url"):
-                _fill_labeled(page, "Website", profile["portfolio_url"])
+                _fill_labeled(page, "Website",   profile["portfolio_url"])
                 _fill_labeled(page, "Portfolio", profile["portfolio_url"])
 
             # ── Resume upload ───────────────────────────────────────────────
@@ -89,53 +94,21 @@ def apply_ashby(
                 _fill_labeled(page, "Cover Letter", cover_letter[:3000])
                 _fill_labeled(page, "Additional Information", cover_letter[:3000])
 
-            # ── Screenshot before submit ────────────────────────────────────
+            # ── Common Y/N questions + Gemini fallback ──────────────────────
+            fill_common_questions(page, profile)
+            tick_required_consent_checkboxes(page)
+            ai_notes = answer_unknowns_with_gemini(page, resume_text=resume_text, profile=profile)
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            screenshot_path = os.path.join(screenshots_dir(), f"ashby_{ts}_before.png")
-            page.screenshot(path=screenshot_path, full_page=False)
+            screenshot_path = os.path.join(screenshots_dir(), f"ashby_{ts}_prefill.png")
+            page.screenshot(path=screenshot_path, full_page=True)
+            coverage = compute_prefill_coverage(page)
 
-            # ── Submit ──────────────────────────────────────────────────────
-            # Ashby's submit button has data-testid or text
-            submit = page.locator(
-                "button[data-testid='submit-application-button'], "
-                "button:has-text('Submit Application'), "
-                "button[type='submit']"
+            return ApplyResult(
+                status="needs_attention", tier=1, apply_url=apply_url,
+                screenshot_path=screenshot_path, cover_letter=cover_letter,
+                notes=build_prefill_notes(coverage, ai_notes),
             )
-            if submit.count() == 0:
-                return ApplyResult(
-                    status="needs_attention", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path,
-                    notes="Submit button not found — dynamic form may need manual review",
-                )
-
-            submit.first.click()
-
-            # ── Confirm ─────────────────────────────────────────────────────
-            try:
-                page.locator("text=application has been submitted").or_(
-                    page.locator("text=Thank you for applying")
-                ).or_(
-                    page.locator("text=successfully submitted")
-                ).wait_for(timeout=12_000)
-                ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshots_dir(), f"ashby_{ts2}_success.png")
-                page.screenshot(path=screenshot_path, full_page=False)
-                return ApplyResult(
-                    status="applied", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path, cover_letter=cover_letter,
-                )
-            except PWTimeout:
-                ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshots_dir(), f"ashby_{ts2}_unclear.png")
-                page.screenshot(path=screenshot_path, full_page=False)
-                return ApplyResult(
-                    status="applied", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path, cover_letter=cover_letter,
-                    notes="Submitted — success confirmation not detected",
-                )
-
-            browser.close()
-
     except Exception as e:
         return ApplyResult(status="failed", tier=1, apply_url=apply_url,
                            screenshot_path=screenshot_path, error=str(e))
@@ -146,12 +119,15 @@ def apply_ashby(
             pass
 
 
-def _fill_labeled(page, label: str, value: str):
+def _fill_labeled(page, label: str, value: str) -> bool:
+    """Fill the first label-matched input. Returns True on success."""
     if not value:
-        return
+        return False
     try:
         el = page.get_by_label(label, exact=False)
         if el.count() > 0:
             el.first.fill(value)
+            return True
     except Exception:
         pass
+    return False

@@ -53,6 +53,9 @@ def load_applicant_profile() -> Dict:
         "github_url":    _sanitize(os.getenv("APPLY_GITHUB", "")),
         "portfolio_url": _sanitize(os.getenv("APPLY_PORTFOLIO", "")),
         "location":      _sanitize(os.getenv("APPLY_LOCATION", "Remote")),
+        # Country is used for residence / country-of-residence form questions
+        # where "Remote" obviously isn't a valid option.
+        "country":       _sanitize(os.getenv("APPLY_COUNTRY", "India")),
     }
 
 
@@ -68,28 +71,27 @@ def resume_pdf_path() -> str:
 
 
 def write_resume_tempfile(resume_text: str, use_pdf: bool = False) -> str:
-    """Write resume to a named temp file for Playwright to attach.
+    """Return a file path Playwright can attach to a file input.
 
-    use_pdf=True  (score 70–79):
-        Attach the stored PDF directly — no tailoring effort wasted on lower scores.
-        Falls back to text if no PDF is on disk.
+    ATS file inputs almost always reject `.txt` resumes, so when
+    `data/resume.pdf` is on disk we use it regardless of the `use_pdf` hint.
+    The tailored text is still surfaced separately (cover-letter / paste-resume
+    textareas) — the file attachment just needs to be a valid PDF.
 
-    use_pdf=False (score ≥ 80):
-        Attach the tailored text that was already rewritten by Gemini.
-        This is the .tex-extracted + AI-tailored version; more effort = higher response rate.
+    Only when no PDF exists do we fall back to a `.txt` of the tailored text.
     """
-    if use_pdf and os.path.exists(_RESUME_PDF_PATH):
+    if os.path.exists(_RESUME_PDF_PATH):
         import shutil
         tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
         tmp.close()
         shutil.copy2(_RESUME_PDF_PATH, tmp.name)
         return tmp.name
 
-    # Write tailored text (or plain text if no tailoring was done)
+    # No PDF on disk — fall back to a text temp file
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
     )
-    tmp.write(resume_text)
+    tmp.write(resume_text or "")
     tmp.close()
     return tmp.name
 

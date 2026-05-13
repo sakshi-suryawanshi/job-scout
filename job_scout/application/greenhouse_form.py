@@ -1,10 +1,10 @@
 # job_scout/application/greenhouse_form.py
 """
-Playwright auto-fill for Greenhouse job application forms.
-Greenhouse forms are the most predictable of the major ATS platforms.
+Playwright prefill for Greenhouse job application forms.
+Apply URL pattern: https://boards.greenhouse.io/{slug}/jobs/{job_id}
+                   https://job-boards.greenhouse.io/{slug}/jobs/{job_id}
 
-Public apply URL pattern: https://boards.greenhouse.io/{slug}/jobs/{job_id}
-or the /apply redirect: https://boards.greenhouse.io/{slug}/jobs/{job_id}#app
+Prefill-only — never auto-submits. The user reviews and clicks Submit.
 """
 
 import os
@@ -12,7 +12,14 @@ import time
 from datetime import datetime
 from typing import Dict, Optional
 
-from job_scout.application.base import ApplyResult, load_applicant_profile, write_resume_tempfile, screenshots_dir
+from job_scout.application.base import (
+    ApplyResult, load_applicant_profile, write_resume_tempfile, screenshots_dir,
+)
+from job_scout.application._form_helpers import (
+    fill_common_questions, fill_other_email_inputs,
+    tick_required_consent_checkboxes,
+    compute_prefill_coverage, answer_unknowns_with_gemini, build_prefill_notes,
+)
 
 
 def apply_greenhouse(
@@ -23,21 +30,9 @@ def apply_greenhouse(
     profile: Optional[Dict] = None,
     use_pdf: bool = False,
 ) -> ApplyResult:
-    """
-    Auto-fill and submit a Greenhouse application form.
-
-    Args:
-        apply_url:    Direct URL to the job application page.
-        resume_text:  Plain-text tailored resume.
-        cover_letter: Generated cover letter text (optional).
-        headless:     True for scheduled runs, False for debug.
-        profile:      Applicant details dict. None = load from env.
-
-    Returns:
-        ApplyResult with status and screenshot path.
-    """
+    """Prefill a Greenhouse application form. Never submits."""
     try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+        from playwright.sync_api import sync_playwright
     except ImportError:
         return ApplyResult(
             status="failed", tier=1, apply_url=apply_url,
@@ -48,10 +43,8 @@ def apply_greenhouse(
         profile = load_applicant_profile()
 
     if not profile.get("email"):
-        return ApplyResult(
-            status="failed", tier=1, apply_url=apply_url,
-            error="APPLY_EMAIL not set in environment",
-        )
+        return ApplyResult(status="failed", tier=1, apply_url=apply_url,
+                           error="APPLY_EMAIL not set in environment")
 
     resume_path = write_resume_tempfile(resume_text, use_pdf=use_pdf)
     screenshot_path = ""
@@ -69,94 +62,62 @@ def apply_greenhouse(
             page.goto(apply_url, wait_until="domcontentloaded")
             time.sleep(1)
 
-            # ── Navigate to the apply form ──────────────────────────────────
-            # Some Greenhouse URLs land on the job description, not the form.
-            # Look for an "Apply" button and click it.
+            # Some Greenhouse URLs land on a description page; click Apply if so.
             try:
-                apply_btn = page.locator("a:has-text('Apply'), button:has-text('Apply'), a:has-text('Apply for this job')")
-                if apply_btn.count() > 0:
-                    apply_btn.first.click()
+                btn = page.locator(
+                    "a:has-text('Apply'), button:has-text('Apply'), "
+                    "a:has-text('Apply for this job')"
+                )
+                if btn.count() > 0:
+                    btn.first.click()
                     page.wait_for_load_state("domcontentloaded")
                     time.sleep(1)
             except Exception:
                 pass
 
-            # ── Fill standard fields ────────────────────────────────────────
+            # ── Standard fields ─────────────────────────────────────────────
             _fill_by_name_or_label(page, "first_name", profile["first_name"])
-            _fill_by_name_or_label(page, "last_name", profile["last_name"])
-            _fill_by_name_or_label(page, "email", profile["email"])
-            _fill_by_name_or_label(page, "phone", profile["phone"])
+            _fill_by_name_or_label(page, "last_name",  profile["last_name"])
+            _fill_by_name_or_label(page, "email",      profile["email"])
+            _fill_by_name_or_label(page, "phone",      profile["phone"])
+            fill_other_email_inputs(page, profile["email"])
 
             if profile.get("linkedin_url"):
                 _fill_by_label_text(page, ["LinkedIn", "LinkedIn URL", "LinkedIn Profile"], profile["linkedin_url"])
-
             if profile.get("github_url"):
                 _fill_by_label_text(page, ["GitHub", "GitHub URL", "GitHub Profile"], profile["github_url"])
-
             if profile.get("portfolio_url"):
                 _fill_by_label_text(page, ["Portfolio", "Website", "Personal Website"], profile["portfolio_url"])
 
             # ── Resume upload ───────────────────────────────────────────────
-            resume_inputs = page.locator("input[type='file']")
-            if resume_inputs.count() > 0:
-                resume_inputs.first.set_input_files(resume_path)
+            file_inputs = page.locator("input[type='file']")
+            if file_inputs.count() > 0:
+                file_inputs.first.set_input_files(resume_path)
                 time.sleep(0.5)
 
             # ── Cover letter ────────────────────────────────────────────────
             if cover_letter:
                 _fill_cover_letter(page, cover_letter)
 
-            # ── Handle common custom questions ──────────────────────────────
-            _fill_common_questions(page, profile)
+            # ── Common Y/N questions + Gemini fallback for unknowns ─────────
+            fill_common_questions(page, profile)
+            tick_required_consent_checkboxes(page)
+            ai_notes = answer_unknowns_with_gemini(page, resume_text=resume_text, profile=profile)
 
-            # ── Screenshot before submit ────────────────────────────────────
+            # ── Screenshot + coverage report ────────────────────────────────
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            screenshot_path = os.path.join(screenshots_dir(), f"greenhouse_{ts}_before.png")
-            page.screenshot(path=screenshot_path, full_page=False)
+            screenshot_path = os.path.join(screenshots_dir(), f"greenhouse_{ts}_prefill.png")
+            page.screenshot(path=screenshot_path, full_page=True)
+            coverage = compute_prefill_coverage(page)
 
-            # ── Submit ──────────────────────────────────────────────────────
-            submit = page.locator("input[type='submit'], button[type='submit'], button:has-text('Submit Application')")
-            if submit.count() == 0:
-                return ApplyResult(
-                    status="needs_attention", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path,
-                    notes="Submit button not found — custom form structure",
-                )
-
-            submit.first.click()
-
-            # ── Confirm success ─────────────────────────────────────────────
-            try:
-                page.locator("text=application has been submitted").or_(
-                    page.locator("text=Thank you")
-                ).or_(
-                    page.locator("text=successfully submitted")
-                ).wait_for(timeout=10_000)
-                ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshots_dir(), f"greenhouse_{ts2}_success.png")
-                page.screenshot(path=screenshot_path, full_page=False)
-                return ApplyResult(
-                    status="applied", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path, cover_letter=cover_letter,
-                )
-            except PWTimeout:
-                # Page changed but no explicit success text — likely still submitted
-                ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = os.path.join(screenshots_dir(), f"greenhouse_{ts2}_unclear.png")
-                page.screenshot(path=screenshot_path, full_page=False)
-                return ApplyResult(
-                    status="applied", tier=1, apply_url=apply_url,
-                    screenshot_path=screenshot_path, cover_letter=cover_letter,
-                    notes="Submitted — success confirmation not detected (may still have applied)",
-                )
-
-            browser.close()
-
+            return ApplyResult(
+                status="needs_attention", tier=1, apply_url=apply_url,
+                screenshot_path=screenshot_path, cover_letter=cover_letter,
+                notes=build_prefill_notes(coverage, ai_notes),
+            )
     except Exception as e:
-        return ApplyResult(
-            status="failed", tier=1, apply_url=apply_url,
-            screenshot_path=screenshot_path, error=str(e),
-        )
+        return ApplyResult(status="failed", tier=1, apply_url=apply_url,
+                           screenshot_path=screenshot_path, error=str(e))
     finally:
         try:
             os.unlink(resume_path)
@@ -164,7 +125,7 @@ def apply_greenhouse(
             pass
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── Greenhouse-specific micro-helpers ───────────────────────────────────────
 
 def _fill_by_name_or_label(page, name: str, value: str):
     if not value:
@@ -173,7 +134,6 @@ def _fill_by_name_or_label(page, name: str, value: str):
         el = page.locator(f"input[name='{name}'], input[id='{name}']")
         if el.count() > 0:
             el.first.fill(value)
-            return
     except Exception:
         pass
 
@@ -192,12 +152,11 @@ def _fill_by_label_text(page, labels, value: str):
 
 
 def _fill_cover_letter(page, cover_letter: str):
-    # Try textarea with cover-letter-related name/id/placeholder
-    for selector in [
+    for selector in (
         "textarea[name*='cover'], textarea[id*='cover'], textarea[placeholder*='cover']",
         "textarea[name*='letter'], textarea[id*='letter']",
         "div[contenteditable='true']",
-    ]:
+    ):
         try:
             el = page.locator(selector)
             if el.count() > 0:
@@ -205,25 +164,4 @@ def _fill_cover_letter(page, cover_letter: str):
                 return
         except Exception:
             continue
-
-    # Fallback: label matching
     _fill_by_label_text(page, ["Cover Letter", "Cover letter", "Message", "Letter"], cover_letter[:3000])
-
-
-def _fill_common_questions(page, profile: Dict):
-    """Answer common yes/no / text questions on Greenhouse custom forms."""
-    # "Are you authorized to work in X?" — answer based on profile
-    try:
-        auth_select = page.locator("select[id*='authorized'], select[name*='authorized']")
-        if auth_select.count() > 0:
-            auth_select.first.select_option("Yes")
-    except Exception:
-        pass
-
-    # "Will you now or in the future require sponsorship?" — No
-    try:
-        sponsor_select = page.locator("select[id*='sponsor'], select[name*='sponsor']")
-        if sponsor_select.count() > 0:
-            sponsor_select.first.select_option("No")
-    except Exception:
-        pass
